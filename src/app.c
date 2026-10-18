@@ -6,15 +6,16 @@
 //
 // Протокол: текстовые строки, ответ "ok ..." или "err ...". Одинаков для USB
 // и для шифрованного BLE-канала (channel.c).
-//   ping | info | wipe | restore <entropy hex>
-//   boot  — перезагрузка в режим прошивки
-//   BTC:  xpub | addr <chain> <i> | show <chain> <i> | sign <hex>
-//   TRON: tron addr <i> | tron show <i> | tron sign <i> <raw_data hex>
-//   BSC:  bsc addr <i>  | bsc show <i>  | bsc sign <i> <unsigned rlp hex>
-//   PRL:  prl addr <chain> <i> | prl show <chain> <i> | prl sign <hex>
+//   ping | info | wipe | boot | restore <entropy hex>
+//   fingerprint                  отпечаток мастер-ключа (PSBT, дескрипторы)
+//   btcd <i[h]> ...              совпадёт ли вывод пути у btcd/Pearl Wallet: ok same | ok differs
+//   addrs <1|5|10|20>            сколько адресов для получения
+//   apps | app ...               приложения WebAssembly — протокол в apps.h
+//   ota ...                      обновление прошивки (esp32/main/ota.h)
+//   Монеты — приложения: app btc|prl|tron|bsc|eth addr|show|sign …, форматы — в начале
+//   apps/utxo/utxo.c, apps/tron/tron.c, apps/evm/evm.c.
 //   show, sign, wipe и restore ждут подтверждения на устройстве, иначе "err rejected".
-//   tron/bsc sign отвечают "ok <r><s><recid>" (65 байт hex),
-//   prl sign — "ok <sig0> <sig1> ..." (64-байтные BIP340-подписи по входам)
+//   info: fw net state coins hw batt chg build boot heap apps apps_free addrs secure ota
 #include "app.h"
 
 #include <stdarg.h>
