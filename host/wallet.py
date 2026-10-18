@@ -19,6 +19,7 @@ MicroWallet: библиотека для общения с устройство�
 
   python wallet.py prl compat             # покажет ли Pearl Wallet с этой фразой те же адреса
   python wallet.py ltc receive | balance | send ADDR AMOUNT [--feerate N] [--dry-run]   # Litecoin
+  python wallet.py sol receive | balance | send ADDR AMOUNT [--dry-run]                 # Solana
   python wallet.py ton send ADDR AMOUNT [--token gram|usdt] [--memo TEXT] [--dry-run]
   python wallet.py tron receive [-i N] | balance [-i N]
   python wallet.py tron send ADDR AMOUNT [--token usdt|trx|trc10:ID] [--fee-limit TRX] [--memo TEXT] [--dry-run]
@@ -65,6 +66,7 @@ from serial.tools import list_ports
 
 import psbt  # PSBT для Sparrow/Electrum (host/psbt.py)
 import ton as T  # TON: ячейки, BoC, кошелёк W5 (host/ton.py)
+import sol as SOL  # Solana: сообщение перевода (host/sol.py)
 
 NETS = {
     "testnet": {
@@ -77,7 +79,7 @@ NETS = {
         "ltc_api": "https://litecoinspace.org/testnet/api",
         "ltc_tx_url": "https://litecoinspace.org/testnet/tx/",
         "ltc_hrp": "tltc",
-        "ltc_b58": {"pkh": (0x6F,), "sh": (0x3A,)},
+        "ltc_b58": {"pkh": (0x6F,), "sh": (0x3A, 0xC4)},
         "tron_api": "https://nile.trongrid.io",
         "tron_tx_url": "https://nile.tronscan.org/#/transaction/",
         "tron_usdt": "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf",
@@ -92,6 +94,10 @@ NETS = {
         "ton_tx_url": "https://testnet.tonviewer.com/transaction/",
         "ton_usdt": None,  # официального USDT в testnet нет
         "gram": "tGRAM",
+        "sol_rpc": "https://api.devnet.solana.com",
+        "sol_tx_url": "https://explorer.solana.com/tx/{txid}?cluster=devnet",
+        "sol": "devSOL",
+        "sol_mints": {"usdc": ("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU", 6)},  # Circle, devnet
     },
     "mainnet": {
         "btc": "BTC",
@@ -103,7 +109,7 @@ NETS = {
         "ltc_api": "https://litecoinspace.org/api",
         "ltc_tx_url": "https://litecoinspace.org/tx/",
         "ltc_hrp": "ltc",
-        "ltc_b58": {"pkh": (0x30,), "sh": (0x32,)},  # L… и M…; «3…» не берём — не отличить от адреса BTC
+        "ltc_b58": {"pkh": (0x30,), "sh": (0x32, 0x05)},  # L…, M… и старый 3… (с предупреждением)
         "tron_api": "https://api.trongrid.io",
         "tron_tx_url": "https://tronscan.org/#/transaction/",
         "tron_usdt": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
@@ -118,6 +124,11 @@ NETS = {
         "ton_tx_url": "https://tonviewer.com/transaction/",
         "ton_usdt": "EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs",
         "gram": "GRAM",
+        "sol_rpc": "https://api.mainnet-beta.solana.com",
+        "sol_tx_url": "https://explorer.solana.com/tx/{txid}",
+        "sol": "SOL",
+        "sol_mints": {"usdc": ("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", 6),
+                      "usdt": ("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", 6)},
     },
 }
 # Монеты и их активы: (id, decimals). Символ берётся из NETS там, где он зависит от сети.
@@ -127,6 +138,7 @@ COINS = {
     "bsc": {"name": "BNB Chain", "assets": [("usdt", 18), ("bnb", 18)]},
     "prl": {"name": "Pearl", "assets": [("prl", 8)]},
     "ltc": {"name": "Litecoin", "assets": [("ltc", 8)]},
+    "sol": {"name": "Solana", "assets": [("sol", 9), ("usdt", 6), ("usdc", 6)]},  # токены — SPL
     "ton": {"name": "TON", "assets": [("gram", 9), ("usdt", 6)]},  # GRAM — бывший Toncoin
 }
 
@@ -137,8 +149,9 @@ def ton_valid_until():
 
 
 def assets_for(coin, net):
-    """Активы монеты в сети: у TON в testnet нет USDT."""
-    return [a for a in COINS[coin]["assets"] if not (coin == "ton" and a[0] == "usdt" and not NETS[net]["ton_usdt"])]
+    """Активы монеты в сети: у TON в testnet нет USDT, у Solana devnet — только USDC."""
+    return [a for a in COINS[coin]["assets"] if not (coin == "ton" and a[0] == "usdt" and not NETS[net]["ton_usdt"])
+            and not (coin == "sol" and a[0] != "sol" and a[0] not in NETS[net]["sol_mints"])]
 UTXO = ("btc", "prl", "ltc")  # монеты с адресами chain/index и подписью входов
 ADDRS_DEFAULT = 20  # адресов для получения, если прошивка не сообщает addrs= (до 0.6)
 CHANGE_MAX = 20     # адреса сдачи идут подряд: проверяем до первого пустого, не дальше
@@ -158,7 +171,7 @@ class DeviceError(WalletError):
 def asset_symbol(cfg, asset):
     if asset.startswith("trc10:"):  # TRC10: ID токена, точность устройству неизвестна
         return "#" + asset[6:]
-    return {"usdt": "USDT", "trx": "TRX"}.get(asset) or cfg[asset]
+    return {"usdt": "USDT", "usdc": "USDC", "trx": "TRX"}.get(asset) or cfg[asset]
 
 
 # ---------------- связь с устройством ----------------
@@ -429,6 +442,29 @@ def b58check_decode(addr):
     if len(raw) < 5 or hashlib.sha256(hashlib.sha256(body).digest()).digest()[:4] != chk:
         raise WalletError("неверная контрольная сумма адреса")
     return body
+
+
+def ltc_old_p2sh(addr, net):
+    """Старый P2SH Litecoin «3…» (testnet «2…»): такой же, как у Bitcoin. -> тот же адрес как M…/Q…,
+    иначе None. Устройство покажет именно M… — с ним и сверять."""
+    try:
+        body = b58check_decode(addr.strip())
+    except WalletError:
+        return None
+    old, new = (0x05, 0x32) if net == "mainnet" else (0xC4, 0x3A)
+    if len(body) != 21 or body[0] != old:
+        return None
+    b = bytes([new]) + body[1:]
+    b += hashlib.sha256(hashlib.sha256(b).digest()).digest()[:4]
+    n, s = int.from_bytes(b, "big"), ""
+    while n:
+        n, r = divmod(n, 58)
+        s = B58[r] + s
+    return s
+
+
+LTC_OLD_P2SH_NOTE = ("Адрес формата 3… такой же у Bitcoin: убедись, что получатель ждёт именно Litecoin. "
+                     "Устройство покажет его как {}")
 
 
 def address_to_script(addr, hrp, pearl=False, b58=None):
@@ -871,6 +907,11 @@ class Wallet:
         addr = self.address(coin, index)
         if coin == "ton":
             return self._ton_balance(addr)
+        if coin == "sol":
+            tokens = [{"id": t, "symbol": t.upper(), "decimals": d, "amount": self._sol_token_balance(addr, m)}
+                      for t, (m, d) in self.cfg["sol_mints"].items()]
+            return {"address": addr, "notes": [], "pending": 0, "assets": sorted(tokens, key=lambda a: a["id"] != "usdt") + [
+                {"id": "sol", "symbol": self.symbol("sol"), "decimals": 9, "amount": self._sol_balance(addr)}]}
         if coin == "tron":
             acc = self._tron_post("/wallet/getaccount", {"address": addr, "visible": True})
             notes = [] if acc else ["Аккаунт не активирован: нужно получить хотя бы 1 TRX"]
@@ -897,6 +938,8 @@ class Wallet:
             return self._prepare_tron(index, dest, amount, asset, fee_limit, memo)
         if coin == "ton":
             return self._prepare_ton(index, dest, amount, asset, memo)
+        if coin == "sol":
+            return self._prepare_sol(index, dest, amount, asset)
         return self._prepare_bsc(index, dest, amount, asset, gas_price)
 
     def sign_and_send(self, draft, broadcast=True):
@@ -904,7 +947,8 @@ class Wallet:
         raw, txid = draft.sign()
         if broadcast:
             draft.broadcast(raw)
-        return {"raw": raw, "txid": txid, "url": draft.tx_url + txid if broadcast else "",
+        url = draft.tx_url.replace("{txid}", txid) if "{txid}" in draft.tx_url else draft.tx_url + txid
+        return {"raw": raw, "txid": txid, "url": url if broadcast else "",
                 "broadcast": broadcast}
 
     # ================= BTC и Pearl =================
@@ -1133,9 +1177,13 @@ class Wallet:
                 post_raw(self._api(coin) + "/tx", raw)
 
         unit = "grain/vB" if prl else "sat/vB"
+        notes = [f"Входов: {len(chosen)}, ставка {feerate} {unit}"]
+        m = ltc_old_p2sh(dest, self.net) if coin == "ltc" else None
+        if m:
+            notes.insert(0, LTC_OLD_P2SH_NOTE.format(m))
         return Draft(coin, coin, self.symbol(coin), self.address(coin, 0), dest.strip(),
                      fmt_units(units, 8), fmt_units(fee, 8), self.symbol(coin),
-                     notes=[f"Входов: {len(chosen)}, ставка {feerate} {unit}"],
+                     notes=notes,
                      sign=sign, broadcast=broadcast,
                      tx_url=f"{cfg['prl_api']}/tx/" if prl else cfg[f"{coin}_tx_url"])
 
@@ -1378,6 +1426,116 @@ class Wallet:
                      self.symbol("gram"), fee_label="Макс. комиссия" if usdt else "Комиссия (оценка)",
                      notes=notes, sign=sign, broadcast=broadcast, tx_url=self.cfg["ton_tx_url"])
 
+    # ================= Solana (SOL) =================
+
+    def _sol(self, method, *params):
+        r = http_json(self.cfg["sol_rpc"], {"jsonrpc": "2.0", "id": 1, "method": method, "params": list(params)})
+        if "error" in r:
+            raise WalletError(f"Solana RPC {method}: {r['error'].get('message', r['error'])}")
+        return r["result"]
+
+    def _sol_balance(self, addr):
+        return int(self._sol("getBalance", addr, {"commitment": "confirmed"})["value"])
+
+    def _sol_token_balance(self, owner, mint):
+        """Баланс токена на ATA владельца; счёта ещё нет — 0."""
+        ata, _ = SOL.ata(SOL.b58decode(owner), SOL.b58decode(mint))
+        try:
+            return int(self._sol("getTokenAccountBalance", SOL.b58encode(ata), {"commitment": "confirmed"})["value"]["amount"])
+        except WalletError:
+            return 0
+
+    def _sol_price(self):
+        """Приоритет: 75-й перцентиль недавних ставок, не больше 5 000 000 микро-lamports."""
+        try:
+            fees = sorted(int(f["prioritizationFee"]) for f in self._sol("getRecentPrioritizationFees"))
+            return min(5_000_000, max(1000, fees[len(fees) * 3 // 4] if fees else 1000))
+        except (WalletError, KeyError, TypeError, ValueError):
+            return 1000
+
+    def _prepare_sol(self, index, dest, amount, asset="sol"):
+        if asset != "sol":
+            return self._prepare_sol_token(index, dest, amount, asset)
+        own_s = self.address("sol", index)
+        try:
+            own, to = SOL.parse_address(own_s), SOL.parse_address(dest)
+        except SOL.SolError as e:
+            raise WalletError(str(e)) from None
+        if own == to:
+            raise WalletError("Это адрес самого кошелька")
+        lamports = to_units(amount, 9)
+        price = self._sol_price()
+        fee = SOL.max_fee(price)
+        rent = int(self._sol("getMinimumBalanceForRentExemption", 0))
+        bal = self._sol_balance(own_s)
+        left = bal - lamports - fee
+        if left < 0:
+            raise WalletError(f"Недостаточно {self.symbol('sol')}: доступно {fmt_units(bal, 9)}")
+        if 0 < left < rent:
+            raise WalletError(f"На счёте должно остаться 0 или не меньше {fmt_units(rent, 9)} (рента Solana)")
+        if lamports < rent and self._sol_balance(dest.strip()) == 0:
+            raise WalletError(f"Получатель новый: отправь не меньше {fmt_units(rent, 9)} (рента Solana)")
+        blockhash = SOL.b58decode(self._sol("getLatestBlockhash", {"commitment": "finalized"})["value"]["blockhash"])
+        msg = SOL.transfer_message(own, to, lamports, blockhash, price)
+
+        def sign():
+            sig = bytes.fromhex(self.dev.call(self.cmd("sol", f"sign {index} {msg.hex()}")))
+            return SOL.transaction(msg, sig).hex(), SOL.b58encode(sig)
+
+        def broadcast(raw_hex):
+            self._sol("sendTransaction", base64.b64encode(bytes.fromhex(raw_hex)).decode(),
+                      {"encoding": "base64", "preflightCommitment": "confirmed"})
+
+        return Draft("sol", "sol", self.symbol("sol"), own_s, dest.strip(), fmt_units(lamports, 9),
+                     fmt_units(fee, 9), self.symbol("sol"), fee_label="Макс. комиссия",
+                     notes=["Блокхэш действует около минуты: подтверди на устройстве не мешкая"],
+                     sign=sign, broadcast=broadcast, tx_url=self.cfg["sol_tx_url"])
+
+    def _prepare_sol_token(self, index, dest, amount, asset):
+        """USDC/USDT: на ATA получателя; нет счёта — создаём (рента с этого кошелька)."""
+        if asset not in self.cfg["sol_mints"]:
+            raise WalletError(f"{asset.upper()} в этой сети Solana нет")
+        mint_s, dec = self.cfg["sol_mints"][asset]
+        own_s = self.address("sol", index)
+        try:
+            own, owner = SOL.parse_address(own_s), SOL.parse_address(dest)
+        except SOL.SolError as e:
+            raise WalletError(str(e)) from None
+        if own == owner:
+            raise WalletError("Это адрес самого кошелька")
+        if not SOL.on_curve(owner):  # ATA и другие PDA — не кошельки: токены туда слать нельзя
+            raise WalletError("Нужен адрес кошелька получателя, а не адрес токен-счёта")
+        mint = SOL.b58decode(mint_s)
+        units = to_units(amount, dec)
+        if units > self._sol_token_balance(own_s, mint_s):
+            raise WalletError(f"Недостаточно {asset.upper()}")
+        dst, _ = SOL.ata(owner, mint)
+        create = self._sol("getAccountInfo", SOL.b58encode(dst), {"encoding": "base64"})["value"] is None
+        price = self._sol_price()
+        blockhash = SOL.b58decode(self._sol("getLatestBlockhash", {"commitment": "finalized"})["value"]["blockhash"])
+        msg, bump, limit = SOL.token_message(own, owner, mint, dec, units, blockhash, price, create)
+        fee = SOL.max_fee(price, limit)
+        need = fee + (SOL.TOKEN_ACCOUNT_RENT if create else 0)
+        bal = self._sol_balance(own_s)
+        if need > bal:
+            raise WalletError(f"Недостаточно {self.symbol('sol')} на комиссию: нужно {fmt_units(need, 9)}")
+
+        def sign():
+            sig = bytes.fromhex(self.dev.call(self.cmd("sol", f"sign {index} {msg.hex()} {dest.strip()} {bump}")))
+            return SOL.transaction(msg, sig).hex(), SOL.b58encode(sig)
+
+        def broadcast(raw_hex):
+            self._sol("sendTransaction", base64.b64encode(bytes.fromhex(raw_hex)).decode(),
+                      {"encoding": "base64", "preflightCommitment": "confirmed"})
+
+        notes = ["Блокхэш действует около минуты: подтверди на устройстве не мешкая"]
+        if create:
+            notes.insert(0, f"У получателя ещё нет счёта {asset.upper()}: его создание — "
+                            f"{fmt_units(SOL.TOKEN_ACCOUNT_RENT, 9)} {self.symbol('sol')} (рента)")
+        return Draft("sol", asset, asset.upper(), own_s, dest.strip(), fmt_units(units, dec),
+                     fmt_units(fee, 9), self.symbol("sol"), fee_label="Макс. комиссия", notes=notes,
+                     sign=sign, broadcast=broadcast, tx_url=self.cfg["sol_tx_url"])
+
     # ================= BSC =================
 
     def _bsc_rpc(self, method, *params):
@@ -1540,6 +1698,9 @@ def main():
         ap.add_argument("--token", choices=["gram", "usdt"], default="gram")
         ap.add_argument("--memo", help="комментарий к переводу (виден в блокчейне всем)")
     coin("ton", ["receive", "balance", "send"], "сумма, например 1.5", ton_opts)
+
+    coin("sol", ["receive", "balance", "send"], "сумма, например 0.5",
+         lambda ap: ap.add_argument("--token", choices=["sol", "usdc", "usdt"], default="sol"))
 
     coin("ltc", ["receive", "balance", "send"], "сумма в LTC, например 0.5",
          lambda ap: ap.add_argument("--feerate", type=Decimal, help="lit/vB (по умолчанию оценка сети)"))

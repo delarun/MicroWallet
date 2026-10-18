@@ -394,6 +394,11 @@ fun CoinIcon(kind: String, size: Dp, modifier: Modifier = Modifier) {
                         drawPath(top, white)
                         drawPath(bottom, white.copy(alpha = 0.8f))
                     }
+                    "sol" -> {  // три наклонные полосы
+                        for (y in listOf(12f, 18.5f, 25f)) drawPath(Path().apply {
+                            moveTo(13 * s, (y + 3) * s); lineTo(16 * s, y * s); lineTo(28 * s, y * s); lineTo(25 * s, (y + 3) * s); close()
+                        }, white)
+                    }
                     "ltc" -> {
                         val t = measurer.measure("Ł", TextStyle(fontSize = (22 * s).toSp(), fontWeight = FontWeight.Bold, color = white))
                         drawText(t, topLeft = Offset(c.x - t.size.width / 2f, c.y - t.size.height / 2f))

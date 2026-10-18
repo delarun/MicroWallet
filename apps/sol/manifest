@@ -1,0 +1,6 @@
+id=sol
+name=Solana
+version=1.1
+# три косые полосы Solana
+icon=007e3e7c7e3e7c00
+path=44'/501'

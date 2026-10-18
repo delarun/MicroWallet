@@ -155,6 +155,30 @@ def main():
         cases.append({"coin": "ltc", "dest": ldest, "amount": "0.05", "feerate": "2",
                       "raw": r["raw"], "txid": r["txid"], "fee": d8.fee, "exact": True})
 
+        # ---------- Solana (devnet): приоритет — 75-й перцентиль ставок ----------
+        srpc = cfg["sol_rpc"]
+        ok = lambda r: {"jsonrpc": "2.0", "id": 1, "result": r}  # noqa: E731
+        responses[f"POST {srpc} getRecentPrioritizationFees"] = ok([{"slot": i, "prioritizationFee": f}
+                                                                      for i, f in enumerate([0, 1000, 5000, 20000])])
+        responses[f"POST {srpc} getMinimumBalanceForRentExemption"] = ok(890880)
+        responses[f"POST {srpc} getBalance"] = ok({"context": {"slot": 1}, "value": 2_000_000_000})
+        responses[f"POST {srpc} getLatestBlockhash"] = ok({"context": {"slot": 1}, "value": {
+            "blockhash": "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N", "lastValidBlockHeight": 100}})
+        sdest = "8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe"
+        d9 = w.prepare_send("sol", sdest, "0.25")
+        r = w.sign_and_send(d9, broadcast=False)
+        cases.append({"coin": "sol", "dest": sdest, "amount": "0.25", "raw": r["raw"], "txid": r["txid"],
+                      "fee": d9.fee, "notes": d9.notes, "exact": True})
+
+        # ---------- Solana: USDC (devnet), у получателя счёта нет — создаётся ----------
+        responses[f"POST {srpc} getTokenAccountBalance"] = ok({"context": {"slot": 1}, "value": {
+            "amount": "50000000", "decimals": 6, "uiAmountString": "50"}})
+        responses[f"POST {srpc} getAccountInfo"] = ok({"context": {"slot": 1}, "value": None})
+        d10 = w.prepare_send("sol", sdest, "7.5", asset="usdc")
+        r = w.sign_and_send(d10, broadcast=False)
+        cases.append({"coin": "sol", "asset": "usdc", "dest": sdest, "amount": "7.5", "raw": r["raw"], "txid": r["txid"],
+                      "fee": d10.fee, "notes": d10.notes, "exact": True})
+
         # ---------- Ethereum, EIP-1559 (тип 2) ----------
         # Python-хост ETH не отправляет — эталон собран вручную по EIP-1559, как его строит
         # Kotlin: maxFee = 2 × baseFee + чаевые; подписывает устройство (симулятор)
@@ -277,7 +301,7 @@ def main():
             cases.append({"coin": "bsc", "asset": asset, "dest": bdest, "amount": amt,
                           "raw": r["raw"], "txid": r["txid"], "fee": d5.fee, "exact": True})
 
-        addrs = {c: w.address(c, 0) for c in ("btc", "prl", "tron", "bsc", "ton", "ltc")}
+        addrs = {c: w.address(c, 0) for c in ("btc", "prl", "tron", "bsc", "ton", "ltc", "sol")}
         dev.p.stdin.close()
 
     json.dump({"addresses": addrs, "responses": responses, "cases": cases}, sys.stdout, indent=1)

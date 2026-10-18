@@ -12,6 +12,10 @@ class NetConfig(
     val ethRpc: String, val ethTxUrl: String, val ethChain: Long, val eth: String, val ethTokens: List<EvmToken>,
     // TON (приложение apps/ton): GRAM — бывший Toncoin; USDT только в mainnet
     val tonApi: String, val tonTxUrl: String, val tonUsdt: String?, val gram: String,
+    // Solana (приложение apps/sol): testnet — devnet; {txid} в ссылке — место подписи
+    val solRpc: String, val solTxUrl: String, val sol: String,
+    /** Токены SPL сети: id -> (mint, точность), как белый список apps/sol. */
+    val solMints: Map<String, Pair<String, Int>>,
 )
 
 class EvmToken(val asset: String, val symbol: String, val contract: String, val decimals: Int)
@@ -40,7 +44,7 @@ val NETS = mapOf(
         ltcApi = "https://litecoinspace.org/testnet/api",
         ltcTxUrl = "https://litecoinspace.org/testnet/tx/",
         ltcHrp = "tltc",
-        ltcB58 = B58Versions(listOf(0x6F), listOf(0x3A)),
+        ltcB58 = B58Versions(listOf(0x6F), listOf(0x3A, 0xC4)),
         tronApi = "https://nile.trongrid.io",
         tronTxUrl = "https://nile.tronscan.org/#/transaction/",
         tronUsdt = "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf",
@@ -60,6 +64,10 @@ val NETS = mapOf(
         tonTxUrl = "https://testnet.tonviewer.com/transaction/",
         tonUsdt = null,
         gram = "tGRAM",
+        solRpc = "https://api.devnet.solana.com",
+        solTxUrl = "https://explorer.solana.com/tx/{txid}?cluster=devnet",
+        sol = "devSOL",
+        solMints = mapOf("usdc" to ("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU" to 6)),  // Circle, devnet
     ),
     "mainnet" to NetConfig(
         btc = "BTC",
@@ -71,7 +79,7 @@ val NETS = mapOf(
         ltcApi = "https://litecoinspace.org/api",
         ltcTxUrl = "https://litecoinspace.org/tx/",
         ltcHrp = "ltc",
-        ltcB58 = B58Versions(listOf(0x30), listOf(0x32)),  // L… и M…; «3…» не берём — не отличить от адреса BTC
+        ltcB58 = B58Versions(listOf(0x30), listOf(0x32, 0x05)),  // L…, M… и старый 3… (с предупреждением)
         tronApi = "https://api.trongrid.io",
         tronTxUrl = "https://tronscan.org/#/transaction/",
         tronUsdt = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
@@ -100,6 +108,13 @@ val NETS = mapOf(
         tonTxUrl = "https://tonviewer.com/transaction/",
         tonUsdt = "EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs",
         gram = "GRAM",
+        solRpc = "https://api.mainnet-beta.solana.com",
+        solTxUrl = "https://explorer.solana.com/tx/{txid}",
+        sol = "SOL",
+        solMints = mapOf(
+            "usdc" to ("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" to 6),
+            "usdt" to ("Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB" to 6),
+        ),
     ),
 )
 
@@ -112,6 +127,7 @@ fun NetConfig.symbol(asset: String): String = ethTokens.firstOrNull { it.asset =
     "bnb" -> bnb
     "prl" -> prl
     "ltc" -> ltc
+    "sol" -> sol
     "gram" -> gram
     else -> if (asset.startsWith("trc10:")) "#" + asset.removePrefix("trc10:") else asset.uppercase()
 }
@@ -125,6 +141,7 @@ class CoinInfo(
 fun CoinInfo.assetsFor(net: String): List<Pair<String, Int>> = when {
     id == "eth" -> NETS.getValue(net).ethTokens.map { it.asset to it.decimals } + ("eth" to 18)
     id == "ton" && NETS.getValue(net).tonUsdt == null -> assets.filter { it.first != "usdt" }  // в testnet USDT нет
+    id == "sol" -> assets.filter { it.first == "sol" || it.first in NETS.getValue(net).solMints }  // devnet — только USDC
     else -> assets
 }
 
@@ -133,6 +150,7 @@ val COINS = listOf(
     CoinInfo("btc", "Bitcoin", listOf("btc" to 8), mapOf("testnet" to "testnet4", "mainnet" to "mainnet")),
     CoinInfo("prl", "Pearl", listOf("prl" to 8), mapOf("testnet" to "testnet2", "mainnet" to "mainnet")),
     CoinInfo("ltc", "Litecoin", listOf("ltc" to 8), mapOf("testnet" to "testnet", "mainnet" to "mainnet")),
+    CoinInfo("sol", "Solana", listOf("sol" to 9, "usdt" to 6, "usdc" to 6), mapOf("testnet" to "devnet", "mainnet" to "mainnet")),
     CoinInfo("tron", "TRON", listOf("usdt" to 6, "trx" to 6), mapOf("testnet" to "Nile", "mainnet" to "mainnet")),
     CoinInfo("bsc", "BNB Chain", listOf("usdt" to 18, "bnb" to 18), mapOf("testnet" to "testnet", "mainnet" to "mainnet")),
     CoinInfo("eth", "Ethereum", listOf("eth" to 18), mapOf("testnet" to "Sepolia", "mainnet" to "mainnet")),
@@ -153,7 +171,7 @@ fun nativeAsset(coin: String) = when (coin) {
 fun CoinInfo.tokensFor(net: String): List<String> = assetsFor(net).map { it.first }.filter { it != nativeAsset(id) }
 
 /** На главной по умолчанию («монета:токен»); новые токены — выключены, пока их не включат. */
-val DEFAULT_SHOWN_TOKENS = setOf("tron:usdt", "bsc:usdt", "eth:usdt", "eth:usdc", "ton:usdt")
+val DEFAULT_SHOWN_TOKENS = setOf("tron:usdt", "bsc:usdt", "eth:usdt", "eth:usdc", "ton:usdt", "sol:usdt", "sol:usdc")
 
 /** Монеты с адресами chain/index и подписью входов (BIP84/BIP86). */
 val UTXO = setOf("btc", "prl", "ltc")

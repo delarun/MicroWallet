@@ -81,7 +81,8 @@ interface WalletApi {
     fun signAndSend(d: Draft, broadcast: Boolean = true): SendResult {
         val (raw, txid) = d.sign()
         if (broadcast) d.broadcast(raw)
-        return SendResult(raw, txid, if (broadcast) d.txUrl + txid else "", broadcast)
+        val url = if ("{txid}" in d.txUrl) d.txUrl.replace("{txid}", txid) else d.txUrl + txid
+        return SendResult(raw, txid, if (broadcast) url else "", broadcast)
     }
     fun restore(phrase: String): Boolean
     /** Приложения на устройстве (пустой список у прошивок без них). */
@@ -484,6 +485,12 @@ class Wallet(
         }
         val addr = address(coin, 0)
         if (coin == "ton") return tonBalance(addr, skip)
+        if (coin == "sol") {
+            val tokens = cfg.solMints.filterKeys { it !in skip }.map { (id, m) ->
+                Asset(id, id.uppercase(), m.second, BigInteger.valueOf(solTokenBalance(addr, m.first)))
+            }.sortedBy { it.id != "usdt" }
+            return Balance(addr, tokens + Asset("sol", symbol("sol"), 9, BigInteger.valueOf(solBalance(addr))))
+        }
         if (coin == "tron") {
             val acc = tronPost("/wallet/getaccount", JSONObject().put("address", addr).put("visible", true)) as JSONObject
             val notes = if (acc.length() == 0) listOf("Аккаунт не активирован: нужно получить хотя бы 1 TRX") else emptyList()
@@ -515,6 +522,8 @@ class Wallet(
             "btc", "prl", "ltc" -> prepareUtxo(req.coin, req.dest, req.amount, req.feerate)
             "tron" -> prepareTron(req.index, req.dest, req.amount, asset, req.feeLimit, req.memo)
             "ton" -> prepareTon(req.index, req.dest, req.amount, asset, req.memo)
+            "sol" -> if (asset == "sol") prepareSol(req.index, req.dest, req.amount)
+            else prepareSolToken(req.index, req.dest, req.amount, asset)
             else -> prepareEvm(cfg.evm(req.coin, chainId), req.index, req.dest, req.amount, asset, req.gasPrice)
         }
     }
@@ -670,9 +679,11 @@ class Wallet(
             Unit
         }
         val unit = if (prl) "grain/vB" else "sat/vB"
+        val notes = arrayListOf("Входов: ${chosen.size}, ставка ${feerate.toPlainString()} $unit")
+        if (coin == "ltc") ltcOldP2sh(dest, net)?.let { notes.add(0, LTC_OLD_P2SH_NOTE.format(it)) }
         return Draft(
             coin, coin, symbol(coin), address(coin, 0), dest, fmtUnits(units, 8), fmtUnits(fee, 8), symbol(coin),
-            notes = listOf("Входов: ${chosen.size}, ставка ${feerate.toPlainString()} $unit"),
+            notes = notes,
             sign = sign, broadcast = broadcast,
             txUrl = if (prl) "${cfg.prlApi}/tx/" else if (coin == "ltc") cfg.ltcTxUrl else cfg.btcTxUrl,
         )
@@ -798,6 +809,114 @@ class Wallet(
             if (usdt) fmtUnits(BigInteger.valueOf(Ton.USDT_ATTACH), 9) else fee?.let { "≈" + fmtUnits(it, 9) } ?: "?",
             symbol("gram"), feeLabel = if (usdt) "Макс. комиссия" else "Комиссия (оценка)",
             notes = notes, sign = sign, broadcast = broadcast, txUrl = cfg.tonTxUrl,
+        )
+    }
+
+    // ================= Solana (SOL) — как _prepare_sol в wallet.py =================
+
+    private fun sol(method: String, vararg params: Any): Any {
+        val p = JSONArray()
+        params.forEach { p.put(it) }
+        val r = http.post(cfg.solRpc, JSONObject().put("jsonrpc", "2.0").put("id", 1).put("method", method).put("params", p)) as JSONObject
+        r.optJSONObject("error")?.let { throw WalletError("Solana RPC $method: ${it.optString("message", it.toString())}") }
+        return r.get("result")
+    }
+
+    private fun solBalance(addr: String): Long =
+        (sol("getBalance", addr, JSONObject().put("commitment", "confirmed")) as JSONObject).getLong("value")
+
+    /** Баланс токена на ATA владельца; счёта ещё нет — 0. */
+    private fun solTokenBalance(owner: String, mint: String): Long {
+        val ata = Sol.ata(Sol.b58decode(owner), Sol.b58decode(mint)).first
+        return try {
+            (sol("getTokenAccountBalance", Sol.b58encode(ata), JSONObject().put("commitment", "confirmed")) as JSONObject)
+                .getJSONObject("value").getString("amount").toLong()
+        } catch (e: WalletError) {
+            0L
+        }
+    }
+
+    private fun solPrice(): Long = try {
+        val a = sol("getRecentPrioritizationFees") as JSONArray
+        val fees = (0 until a.length()).map { a.getJSONObject(it).getLong("prioritizationFee") }.sorted()
+        minOf(5_000_000L, maxOf(1000L, if (fees.isEmpty()) 1000L else fees[fees.size * 3 / 4]))
+    } catch (e: WalletError) {
+        1000L
+    } catch (e: org.json.JSONException) {
+        1000L
+    }
+
+    /** USDC/USDT: на ATA получателя; нет счёта — создаём (рента с этого кошелька). Как _prepare_sol_token. */
+    private fun prepareSolToken(index: Int, destIn: String, amount: String, asset: String): Draft {
+        val (mintS, dec) = cfg.solMints[asset] ?: throw WalletError("${asset.uppercase()} в этой сети Solana нет")
+        val ownS = address("sol", index)
+        val own = Sol.parseAddress(ownS)
+        val owner = Sol.parseAddress(destIn)
+        if (own.contentEquals(owner)) throw WalletError("Это адрес самого кошелька")
+        if (!Sol.onCurve(owner)) throw WalletError("Нужен адрес кошелька получателя, а не адрес токен-счёта")
+        val mint = Sol.b58decode(mintS)
+        val units = toUnits(amount, dec).toLong()
+        if (units > solTokenBalance(ownS, mintS)) throw WalletError("Недостаточно ${asset.uppercase()}")
+        val dst = Sol.ata(owner, mint).first
+        val info = sol("getAccountInfo", Sol.b58encode(dst), JSONObject().put("encoding", "base64")) as JSONObject
+        val create = info.isNull("value")
+        val price = solPrice()
+        val bh = (sol("getLatestBlockhash", JSONObject().put("commitment", "finalized")) as JSONObject)
+            .getJSONObject("value").getString("blockhash")
+        val tm = Sol.tokenMessage(own, owner, mint, dec, units, Sol.b58decode(bh), price, create)
+        val fee = Sol.maxFee(price, tm.limit)
+        val need = fee + if (create) Sol.TOKEN_ACCOUNT_RENT else 0L
+        if (need > solBalance(ownS)) throw WalletError("Недостаточно ${symbol("sol")} на комиссию: нужно ${fmtUnits(need, 9)}")
+        val dest = destIn.trim()
+        val sign = {
+            val sig = dev.call(cmd("sol", "sign $index ${tm.msg.hex()} $dest ${tm.bump}")).unhex()
+            Sol.transaction(tm.msg, sig).hex() to Sol.b58encode(sig)
+        }
+        val broadcast = { rawHex: String ->
+            sol("sendTransaction", java.util.Base64.getEncoder().encodeToString(rawHex.unhex()),
+                JSONObject().put("encoding", "base64").put("preflightCommitment", "confirmed"))
+            Unit
+        }
+        val notes = arrayListOf("Блокхэш действует около минуты: подтверди на устройстве не мешкая")
+        if (create) notes.add(0, "У получателя ещё нет счёта ${asset.uppercase()}: его создание — " +
+            "${fmtUnits(Sol.TOKEN_ACCOUNT_RENT, 9)} ${symbol("sol")} (рента)")
+        return Draft(
+            "sol", asset, asset.uppercase(), ownS, dest, fmtUnits(units, dec), fmtUnits(fee, 9), symbol("sol"),
+            feeLabel = "Макс. комиссия", notes = notes, sign = sign, broadcast = broadcast, txUrl = cfg.solTxUrl,
+        )
+    }
+
+    private fun prepareSol(index: Int, destIn: String, amount: String): Draft {
+        val ownS = address("sol", index)
+        val own = Sol.parseAddress(ownS)
+        val to = Sol.parseAddress(destIn)
+        if (own.contentEquals(to)) throw WalletError("Это адрес самого кошелька")
+        val lamports = toUnits(amount, 9).toLong()
+        val price = solPrice()
+        val fee = Sol.maxFee(price)
+        val rent = (sol("getMinimumBalanceForRentExemption", 0) as Number).toLong()
+        val bal = solBalance(ownS)
+        val left = bal - lamports - fee
+        if (left < 0) throw WalletError("Недостаточно ${symbol("sol")}: доступно ${fmtUnits(bal, 9)}")
+        if (left in 1 until rent) throw WalletError("На счёте должно остаться 0 или не меньше ${fmtUnits(rent, 9)} (рента Solana)")
+        if (lamports < rent && solBalance(destIn.trim()) == 0L)
+            throw WalletError("Получатель новый: отправь не меньше ${fmtUnits(rent, 9)} (рента Solana)")
+        val bh = ((sol("getLatestBlockhash", JSONObject().put("commitment", "finalized")) as JSONObject)
+            .getJSONObject("value").getString("blockhash"))
+        val msg = Sol.transferMessage(own, to, lamports, Sol.b58decode(bh), price)
+        val sign = {
+            val sig = dev.call(cmd("sol", "sign $index ${msg.hex()}")).unhex()
+            Sol.transaction(msg, sig).hex() to Sol.b58encode(sig)
+        }
+        val broadcast = { rawHex: String ->
+            sol("sendTransaction", java.util.Base64.getEncoder().encodeToString(rawHex.unhex()),
+                JSONObject().put("encoding", "base64").put("preflightCommitment", "confirmed"))
+            Unit
+        }
+        return Draft(
+            "sol", "sol", symbol("sol"), ownS, destIn.trim(), fmtUnits(lamports, 9), fmtUnits(fee, 9), symbol("sol"),
+            feeLabel = "Макс. комиссия", notes = listOf("Блокхэш действует около минуты: подтверди на устройстве не мешкая"),
+            sign = sign, broadcast = broadcast, txUrl = cfg.solTxUrl,
         )
     }
 

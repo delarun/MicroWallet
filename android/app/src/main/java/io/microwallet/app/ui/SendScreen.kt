@@ -53,6 +53,9 @@ import com.journeyapps.barcodescanner.ScanOptions
 import io.microwallet.app.core.COINS
 import io.microwallet.app.core.Draft
 import io.microwallet.app.core.NetConfig
+import io.microwallet.app.core.LTC_OLD_P2SH_NOTE
+import io.microwallet.app.core.Sol
+import io.microwallet.app.core.ltcOldP2sh
 import io.microwallet.app.core.Ton
 import io.microwallet.app.core.UTXO
 import io.microwallet.app.core.SendRequest
@@ -129,6 +132,7 @@ fun validateDest(coin: String, cfg: NetConfig, text: String): String? = try {
     when (coin) {
         "btc" -> addressToScript(text, cfg.hrp, false, cfg.btcB58)
         "ltc" -> addressToScript(text, cfg.ltcHrp, false, cfg.ltcB58)
+        "sol" -> Sol.parseAddress(text)
         "prl" -> addressToScript(text, cfg.prlHrp, true)
         "tron" -> tronDecode(text)
         "ton" -> Ton.parseAddress(text, cfg.tonUsdt == null)
@@ -139,7 +143,7 @@ fun validateDest(coin: String, cfg: NetConfig, text: String): String? = try {
     e.message
 }
 
-private val HINTS = mapOf("btc" to "bc1…, 1… или 3…", "ltc" to "ltc1…, L… или M…", "prl" to "prl1p… (Taproot)", "tron" to "T…", "bsc" to "0x…", "eth" to "0x…", "ton" to "UQ… или EQ…")
+private val HINTS = mapOf("btc" to "bc1…, 1… или 3…", "ltc" to "ltc1…, L… или M…", "sol" to "base58, 32–44 символа", "prl" to "prl1p… (Taproot)", "tron" to "T…", "bsc" to "0x…", "eth" to "0x…", "ton" to "UQ… или EQ…")
 
 @Composable
 fun SendScreen(vm: AppViewModel) {
@@ -246,8 +250,14 @@ private fun SendForm(vm: AppViewModel) {
             })
         }
         val destErr = if (s.dest.isEmpty()) null else validateDest(s.coin, w.cfg, s.dest)
+        val oldP2sh = if (destErr == null && s.coin == "ltc") ltcOldP2sh(s.dest, w.net) else null
         if (s.dest.isNotEmpty()) Text(
-            destErr ?: "✓  Адрес корректный", color = if (destErr == null) C.ok else C.bad, fontSize = 12.sp,
+            when {
+                destErr != null -> destErr
+                oldP2sh != null -> "⚠  " + LTC_OLD_P2SH_NOTE.format(oldP2sh)  // старый P2SH — такой же у Bitcoin
+                else -> "✓  Адрес корректный"
+            },
+            color = if (destErr != null) C.bad else if (oldP2sh != null) C.warn else C.ok, fontSize = 12.sp, lineHeight = 17.sp,
             modifier = Modifier.padding(top = 6.dp),
         )
         Spacer(Modifier.height(10.dp))
@@ -298,6 +308,11 @@ private fun SendForm(vm: AppViewModel) {
                     placeholder = "видно в блокчейне всем",
                     keyboard = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii))
                 if (s.memo.isNotEmpty()) Hint("Memo стоит ~1 TRX и показывается на устройстве")
+            }
+            s.coin == "sol" -> {
+                FieldLabel("Комиссия")
+                Hint(if (s.asset == "sol") "5000 lamports за подпись и немного за приоритет: около 0.000005 SOL"
+                     else "Около 0.00001 SOL; если у получателя нет счёта этого токена — ещё 0.002 SOL (рента)")
             }
             s.coin == "ton" -> {
                 FieldLabel("Комиссия")

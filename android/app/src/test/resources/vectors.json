@@ -5,7 +5,8 @@
   "tron": "TUEZSdKsoDHQMeZwihtdoBiN46zxhGWYdH",
   "bsc": "0x9858EfFD232B4033E47d90003D41EC34EcaEda94",
   "ton": "0QDxNqXW0IXweuExwOiUuybRpkO2hzOift66DtiHIobBIn_X",
-  "ltc": "tltc1q6rz28mcfaxtmd6v789l9rrlrusdprr9pesrjxk"
+  "ltc": "tltc1q6rz28mcfaxtmd6v789l9rrlrusdprr9pesrjxk",
+  "sol": "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk"
  },
  "responses": {
   "TEXT https://mempool.space/testnet4/api/tx/fa6b66ae9631802906bd271b29a629a49a0a702eaa0e1c520d03f94cc98398ff/hex": "0200000001a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a10000000000ffffffff013075000000000000160014d0c4a3ef09e997b6e99e397e518fe3e41a118ca100000000",
@@ -691,6 +692,80 @@
     "tx_count": 0
    }
   },
+  "POST https://api.devnet.solana.com getRecentPrioritizationFees": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "result": [
+    {
+     "slot": 0,
+     "prioritizationFee": 0
+    },
+    {
+     "slot": 1,
+     "prioritizationFee": 1000
+    },
+    {
+     "slot": 2,
+     "prioritizationFee": 5000
+    },
+    {
+     "slot": 3,
+     "prioritizationFee": 20000
+    }
+   ]
+  },
+  "POST https://api.devnet.solana.com getMinimumBalanceForRentExemption": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "result": 890880
+  },
+  "POST https://api.devnet.solana.com getBalance": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "result": {
+    "context": {
+     "slot": 1
+    },
+    "value": 2000000000
+   }
+  },
+  "POST https://api.devnet.solana.com getLatestBlockhash": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "result": {
+    "context": {
+     "slot": 1
+    },
+    "value": {
+     "blockhash": "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N",
+     "lastValidBlockHeight": 100
+    }
+   }
+  },
+  "POST https://api.devnet.solana.com getTokenAccountBalance": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "result": {
+    "context": {
+     "slot": 1
+    },
+    "value": {
+     "amount": "50000000",
+     "decimals": 6,
+     "uiAmountString": "50"
+    }
+   }
+  },
+  "POST https://api.devnet.solana.com getAccountInfo": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "result": {
+    "context": {
+     "slot": 1
+    },
+    "value": null
+   }
+  },
   "POST https://ethereum-sepolia-rpc.publicnode.com eth_getTransactionCount": {
    "jsonrpc": "2.0",
    "id": 1,
@@ -1013,6 +1088,32 @@
    "exact": true
   },
   {
+   "coin": "sol",
+   "dest": "8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe",
+   "amount": "0.25",
+   "raw": "019c50f5043277a7dfbc31ea9988bad714c5f9169d96c01c226a443ecde1c33fb0a495b79dc5c327bb3496b8042aae76ceb7bbf65943454133682d53de74c50a0301000204f036276246a75b9de3349ed42b15e232f6518fc20f5fcd4f1d64e81f9bd258f76e7a1cdd29b0b78fd13af4c5598feff4ef2a97166e3ca6f2e4fbfccd80505bf100000000000000000000000000000000000000000000000000000000000000000306466fe5211732ffecadba72c39be7bc8ce5bbc5f7126b2c439b3a40000000cc490e928cd2e3873bb343fc95da33179ca60f4dbf46c2c36e91299d55d4e6b90303000502e803000003000903204e000000000000020200010c0200000080b2e60e00000000",
+   "txid": "48GPB9V1L9r2sdoyu8B8N3XVxLTxatCukkbus75J4Sx58cz59BNxKoTW3fwraTQVbsGnPF2c61koK5qV5pV7PcY2",
+   "fee": "0.00000502",
+   "notes": [
+    "\u0411\u043b\u043e\u043a\u0445\u044d\u0448 \u0434\u0435\u0439\u0441\u0442\u0432\u0443\u0435\u0442 \u043e\u043a\u043e\u043b\u043e \u043c\u0438\u043d\u0443\u0442\u044b: \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438 \u043d\u0430 \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u0435 \u043d\u0435 \u043c\u0435\u0448\u043a\u0430\u044f"
+   ],
+   "exact": true
+  },
+  {
+   "coin": "sol",
+   "asset": "usdc",
+   "dest": "8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe",
+   "amount": "7.5",
+   "raw": "0166863158d15a2264b7b177a14cfcfb7649cfaf1765ed8c5596bd49c0f7bb51187ed8516e795b9bf3f181b4e77b4109a932c6c68b7def3de2e4a5554646dab70c01000609f036276246a75b9de3349ed42b15e232f6518fc20f5fcd4f1d64e81f9bd258f75619d77076f48ea8f9f7c7ba03cc800694218a742082abdce1c781066d3a10879f8eb223a4dc932cfbda78d0c76d00474c7d0a6218f822fdef78329dcb6e091a6e7a1cdd29b0b78fd13af4c5598feff4ef2a97166e3ca6f2e4fbfccd80505bf13b442cb3912157f13a933d0134282d032b5ffecd01a2dbf1b7790608df002ea7000000000000000000000000000000000000000000000000000000000000000006ddf6e1d765a193d9cbe146ceeb79ac1cb485ed5f5b37913a8cf5857eff00a98c97258f4e2489f1bb3d1029148e0d830b5a1399daff1084048e7bd8dbe9f8590306466fe5211732ffecadba72c39be7bc8ce5bbc5f7126b2c439b3a40000000cc490e928cd2e3873bb343fc95da33179ca60f4dbf46c2c36e91299d55d4e6b9040800050250c3000008000903204e000000000000070600010304050601010604020401000a0ce07072000000000006",
+   "txid": "33tV2oQR5Zu26UsskNNQ4viz73cKggvrT6ZAYGD8CxXjeYM7iXWGAFQKTCd3R42TNMX4Pv7ZSgPxUE87L55cgvnX",
+   "fee": "0.000006",
+   "notes": [
+    "\u0423 \u043f\u043e\u043b\u0443\u0447\u0430\u0442\u0435\u043b\u044f \u0435\u0449\u0451 \u043d\u0435\u0442 \u0441\u0447\u0451\u0442\u0430 USDC: \u0435\u0433\u043e \u0441\u043e\u0437\u0434\u0430\u043d\u0438\u0435 \u2014 0.00203928 devSOL (\u0440\u0435\u043d\u0442\u0430)",
+    "\u0411\u043b\u043e\u043a\u0445\u044d\u0448 \u0434\u0435\u0439\u0441\u0442\u0432\u0443\u0435\u0442 \u043e\u043a\u043e\u043b\u043e \u043c\u0438\u043d\u0443\u0442\u044b: \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438 \u043d\u0430 \u0443\u0441\u0442\u0440\u043e\u0439\u0441\u0442\u0432\u0435 \u043d\u0435 \u043c\u0435\u0448\u043a\u0430\u044f"
+   ],
+   "exact": true
+  },
+  {
    "coin": "eth",
    "asset": "eth",
    "dest": "0x3535353535353535353535353535353535353535",
@@ -1027,7 +1128,7 @@
    "dest": "tprl1pyfv094rr0vk28lf8v9yx3veaacdzg26ztqk4ga84zucqqhafnn5qp0r9sv",
    "amount": "5.5",
    "feerate": "2",
-   "raw": "02000000000102b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b10000000000fdffffffb3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b30200000000fdffffff028055c820000000002251202258f2d4637b2ca3fd27614868b33dee1a242b42582d5474f51730005fa99ce8d81b2c0400000000225120d73acf6667b7850e6e00e21bb4525a2c5e2d88956a3d2c35b0bc06f4b0df01bc0140adf4cdcb70bf960ec01ba3658ca44b6bd037e5a95cbf3d9f6cd8f407f5fa5ba6b6922046ecdc65239d3cbc34a14daa262ba528604d14f82490f567b70e37fbc6014074818b534e4f5cb8b30358956d073057f4cad0156b17d64d57569bd23168e0e6f9832359437786f35b2d7716ca0a76e29ae388b43df03df9302718e8c7330abf00000000",
+   "raw": "02000000000102b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b10000000000fdffffffb3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b30200000000fdffffff028055c820000000002251202258f2d4637b2ca3fd27614868b33dee1a242b42582d5474f51730005fa99ce8d81b2c0400000000225120d73acf6667b7850e6e00e21bb4525a2c5e2d88956a3d2c35b0bc06f4b0df01bc0140498ac1964a187b1ff42dc03541068ca7b0b6310a00d35b1a627b07d77fd4824b628126588c4ca10498089d7ba2909685183b2020e0975eeab4e08a809f2258940140b3ba45895550c592ca5884550b65c7b5a8a27bcae0cb387b903477dfdf6d0b87c82e1d9e38ae68e37c83589c62cc3b50cfd32508b0bb54716c7015dcef01d21400000000",
    "txid": "d76f65d4bb263d9fc5780986f23be54c7855adadc78b9bc787bb60fab0224346",
    "fee": "0.00000424",
    "exact": false,

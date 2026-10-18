@@ -4,7 +4,7 @@
 // Приложения узнают её через mw_net() и сами выбирают пути, префиксы и токены.
 #pragma once
 
-#define FW_VERSION "0.8.0"
+#define FW_VERSION "0.8.1"
 
 #ifdef MW_MAINNET
 #define NET_NAME "mainnet"

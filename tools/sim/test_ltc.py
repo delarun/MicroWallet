@@ -136,6 +136,16 @@ def main():
             assert f"Review: {name} transfer" in sc
             print(f"2. {name}: на P2PKH и P2SH — подписи BIP143 верны, на экране {want[0][:6]}… и {want[1][:6]}…")
 
+        # ---- старый P2SH Litecoin «3…» (такой же, как у Bitcoin): хост берёт с предупреждением,
+        # устройство показывает тот же адрес как M… ----
+        net = "mainnet" if main_net else "testnet"
+        old = b58check(bytes([0x05 if main_net else 0xC4]) + h20)
+        m = W.ltc_old_p2sh(old, net)
+        assert m == b58check(bytes([0x32 if main_net else 0x3A]) + h20)
+        assert W.address_to_script(old, hrp, False, W.NETS[net]["ltc_b58"]) == sh
+        assert any(m in s for s in sim.screens()), "M… на экране"
+        print(f"3. старый {old[:6]}… принимается с предупреждением; устройство показывает {m[:6]}…")
+
         # ---- чужая монета: выход на Bitcoin-адрес — не наш для Litecoin (в testnet у обеих
         # coin type 1 — ключи и скрипты совпадают, проверять нечего) ----
         if not main_net:
@@ -147,7 +157,7 @@ def main():
               "ins": [{"txid": tb, "vout": 0, "value": 90000, "chain": 0, "index": 0, "sequence": 0xFFFFFFFD}],
               "outs": [{"value": 80000, "script": pkh, "change": False}]}
         assert sign("ltc", tx, [pb]) == "err prev output is not ours"
-        print("3. отказ: выход предыдущей транзакции на Bitcoin-адрес Litecoin не подписывает")
+        print("4. отказ: выход предыдущей транзакции на Bitcoin-адрес Litecoin не подписывает")
         sim.close()
     print("всё прошло")
 

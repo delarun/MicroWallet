@@ -2,8 +2,9 @@
 
 Прошивки, приложения и APK — в [релизах](https://github.com/delarun/MicroWallet/releases).
 
-Монеты: **BTC**, **Pearl** (PRL), **TRON** (TRX, USDT-TRC20, TRC10), **BNB Chain** (BNB, USDT-BEP20),
-**Ethereum** (ETH, USDT, USDC), **TON** (GRAM — бывший Toncoin, USDT) — из одной мнемоники (12/18/24 слова). В прошивке только ключи,
+Монеты: **BTC**, **Litecoin**, **Solana** (SOL, USDC, USDT), **Pearl** (PRL), **TRON** (TRX, USDT-TRC20, TRC10),
+**BNB Chain** (BNB, USDT-BEP20), **Ethereum** (ETH и ERC-20: USDT, USDC, DAI, USDe, PYUSD, SHIB, PEPE),
+**TON** (GRAM — бывший Toncoin, USDT) — из одной мнемоники (12/18/24 слова). В прошивке только ключи,
 экраны и связь; каждая монета — приложение WebAssembly в песочнице, ставится и обновляется
 отдельно (как у Ledger).
 
@@ -13,7 +14,8 @@
 - PIN из 4 цифр одной кнопкой: цифра — длительность нажатия;
 - защищённая сборка: Secure Boot v2 + шифрование флеша и NVS.
 
-> ⚠️ **По умолчанию сборка — testnet** (BTC testnet4, TRON Nile, BSC testnet, Pearl testnet2, TON testnet).
+> ⚠️ **По умолчанию сборка — testnet** (BTC testnet4, Litecoin testnet, Solana devnet, TRON Nile, BSC testnet,
+> Pearl testnet2, TON testnet).
 > В обычной сборке seed лежит во флеше открыто: у кого устройство, у того и монеты. Это учебный
 > проект — на mainnet держи только мелкие суммы.
 
@@ -58,7 +60,7 @@ Seed и настройки при обновлении сохраняются. �
 иконок приложений (как у Ledger Nano X), сверху сеть, Bluetooth, USB и заряд.
 
 ```
-Bitcoin ─ Pearl ─ TRON ─ BNB Chain ─ Ethereum ─ TON ─ Settings
+Bitcoin ─ Pearl ─ Litecoin ─ Solana ─ TRON ─ BNB Chain ─ Ethereum ─ TON ─ Settings
    └─ Receive ─ About ─ Remove ─ Back
 Settings: Brightness ─ Sleep ─ Power off ─ Addresses ─ PIN ─ Remove PIN ─ Turn off ─ Battery ─
           Bluetooth ─ Forget PCs ─ MicroWallet ─ Wipe ─ Back
@@ -90,7 +92,9 @@ PIN спрашивается при включении (до него ключи
 **Android** (`android/`, Kotlin + Compose, по Bluetooth): обзор балансов (обновление жестом
 вниз), получить (QR, проверка на устройстве), отправить (QR-сканер, проверка адреса, комиссия,
 memo для TRON, комментарий для TON), устройство (прошивка с GitHub/ПК/файла с выбором версии, приложения и их порядок
-на экране, PSBT, проверка Pearl Wallet). Само обновляется из релизов (сверка SHA-256). Есть демо.
+на экране, PSBT, проверка Pearl Wallet). Токены на главной убираются удержанием и включаются в
+«Устройство → Токены на главной»: скрытые не запрашиваются (меньше запросов к сетям); новые
+токены (DAI, USDe, PYUSD, SHIB, PEPE) сначала выключены. Само обновляется из релизов (сверка SHA-256). Есть демо.
 
 **ПК** — `python host/app.py` (`--ble auto`, `--demo`), то же самое; зависимости —
 `pip install -r host/requirements.txt`.
@@ -107,6 +111,8 @@ python host/wallet.py tron send T… 3 --token trx --memo "invoice 42"      # TR
 python host/wallet.py bsc send 0x… 0.01 --token bnb
 python host/wallet.py prl send prl1p… 12.5     # prl compat — совместимость с Pearl Wallet
 python host/wallet.py ton send UQ… 1.5 --memo "hi"                         # USDT: --token usdt
+python host/wallet.py ltc send ltc1… 0.5        # и старые адреса L…/M…; у BTC — 1…/3…
+python host/wallet.py sol send 8SFq… 0.25       # Solana (testnet — devnet); USDC/USDT: --token usdc
 python host/wallet.py btc descriptor           # watch-only для Sparrow/Electrum
 python host/wallet.py btc psbt-sign tx.psbt -o signed.psbt [--broadcast]
 ```
@@ -130,6 +136,12 @@ P2WPKH-входы и SIGHASH_ALL; мультиподписи и подписи �
 Первая отправка разворачивает кошелёк (в сообщение добавляется StateInit). Данные — toncenter,
 ключ можно задать в `TONCENTER_API_KEY`.
 
+**Solana: токены.** На экране — адрес кошелька получателя, а токены идут на его счёт токена
+(ATA). Устройство само выводит этот счёт из адреса и mint и сверяет с транзакцией — подменить
+получателя хост не может. Если счёта у получателя нет, транзакция его создаёт: экран покажет
+ренту (0.00203928 SOL), её платит отправитель. Адрес «3…» для Litecoin принимается с
+предупреждением: такой же формат у Bitcoin, устройство покажет его как M….
+
 **TRON.** Сколько TRX сгорит (энергия, bandwidth, активация, memo), хост оценивает по ноде;
 лимит по умолчанию — 40 TRX или оценка + 20 %. Для TronGrid можно задать `TRONGRID_API_KEY`.
 
@@ -144,7 +156,9 @@ P2WPKH-входы и SIGHASH_ALL; мультиподписи и подписи �
 
 | Монета | Путь | Что проверяется |
 |---|---|---|
-| BTC | `m/84'/1'/0'` (mainnet `84'/0'`) | получатели на экране; адрес сдачи выводит само; суммы входов — по предыдущим транзакциям целиком. До 64 входов и 16 выходов |
+| BTC | `m/84'/1'/0'` (mainnet `84'/0'`) | получатели на экране (bc1…, а также старые 1…/3…); адрес сдачи выводит само; суммы входов — по предыдущим транзакциям целиком. До 64 входов и 16 выходов |
+| LTC | `m/84'/1'/0'` (mainnet `84'/2'/0'`) | то же, что BTC (то же приложение utxo): ltc1…, L…, M…; данные — litecoinspace.org |
+| SOL | `m/44'/501'/i'/0'` (как Phantom) | сам разбирает сообщение (legacy и v0): одна подпись — своя, ровно один перевод — SOL или токена из белого списка (USDC, USDT; TransferChecked, точность сверяется); ComputeBudget — не больше одного лимита и цены; таблиц адресов и других программ — нет; потолок комиссии на экране |
 | PRL | `m/86'/1'/0'` (mainnet `86'/808276'/0'`) | BIP341 подписывает суммы всех входов; выводы P2TR и P2MR |
 | TRON | `m/44'/195'/0'/0/i` | сам разбирает protobuf ноды: один контракт (TRX, TRC10, `transfer()` USDT), лишние поля — отказ; memo на экране; `fee_limit` — потолок, оценку хоста выше потолка отклоняет |
 | BSC, ETH | `m/44'/60'/0'/0/i` | строгий RLP, legacy EIP-155 и EIP-1559; только перевод или `transfer()` токена из белого списка; nonce и сеть на экране |
@@ -164,7 +178,8 @@ tools/release.sh [v0.7.3]                        # всё для релиза в
 
 Симулятор — то же ядро на ПК (`tools/sim/build.sh mwsim`), на нём тесты:
 `test_apps` (песочница, EVM), `test_golden` (адреса и подписи против эталонов), `test_utxo`,
-`test_psbt` (против embit), `test_tron`, `test_ton` (против @ton/ton), `test_pin`, `test_btcd`, `test_curves`, `test_store`
+`test_psbt` (против embit), `test_tron`, `test_ton` (против @ton/ton), `test_sol` (против @solana/web3.js),
+`test_ltc`, `test_pin`, `test_btcd`, `test_curves`, `test_store`
 (`python3 tools/sim/<тест>.py mwsim`). Android: `MW_SIM=… ./gradlew testDebugUnitTest` —
 Kotlin-кошелёк собирает те же транзакции байт в байт, что `host/wallet.py`.
 
@@ -200,6 +215,9 @@ Kotlin-кошелёк собирает те же транзакции байт �
 | Проверка совместимости с Pearl Wallet | ✅ | нужна прошивка 0.7.3 |
 | TON: GRAM, USDT, кошелёк W5 | ✅ против @ton/ton | адреса и оценка комиссии — на testnet; отправка не проверена |
 | PIN одной кнопкой | ✅ | ввод на плате не проверен |
+| Solana (SOL) | ✅ против @solana/web3.js | ✅ перевод в devnet: подписан симулятором устройства, принят сетью |
+| Solana: USDC, USDT | ✅ против web3.js и spl-token | вывод ATA сверен с mainnet; отправка не проверена |
+| Litecoin, старые адреса BTC/LTC | ✅ | баланс и комиссия — на testnet; отправка не проверена |
 | Secure Boot, OTA по USB и Bluetooth, BLE-канал | ✅ | ✅ на плате (mainnet, secure) |
 
 ## Известные слабые места

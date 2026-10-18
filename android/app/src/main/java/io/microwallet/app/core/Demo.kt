@@ -13,7 +13,7 @@ class DemoWallet(empty: Boolean = false, private val wordlist: List<String> = em
     )
         private set
     override val net = "testnet"
-    override val coins = listOf("btc", "prl", "ltc", "tron", "bsc", "eth", "ton")
+    override val coins = listOf("btc", "prl", "ltc", "sol", "tron", "bsc", "eth", "ton")
     override val ready get() = info["state"] == "ready"
     override val label = "Демо"
 
@@ -25,6 +25,7 @@ class DemoWallet(empty: Boolean = false, private val wordlist: List<String> = em
         "prl" to "tprl1pr6yuq8u2r95wjzzgpdy8cpnncpl7l8zgy6x5q0367pnc53s2famqg7pt74",
         "ton" to "0QDxNqXW0IXweuExwOiUuybRpkO2hzOift66DtiHIobBIn_X",
         "ltc" to "tltc1q6rz28mcfaxtmd6v789l9rrlrusdprr9pesrjxk",
+        "sol" to "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk",
     )
 
     override fun address(coin: String, index: Int, chain: Int): String {
@@ -57,6 +58,7 @@ class DemoWallet(empty: Boolean = false, private val wordlist: List<String> = em
             )
             "ton" -> listOf(Asset("gram", "tGRAM", 9, BigInteger.valueOf(12_340_000_000)))
             "ltc" -> listOf(Asset("ltc", "tLTC", 8, BigInteger.valueOf(87_500_000)))
+            "sol" -> listOf(Asset("sol", "devSOL", 9, BigInteger.valueOf(2_500_000_000)))
             "eth" -> listOf(
                 Asset("usdc", "USDC", 6, BigInteger.valueOf(40_000_000)),
                 Asset("eth", "SepoliaETH", 18, e18.divide(BigInteger.valueOf(20))),
@@ -81,6 +83,7 @@ class DemoWallet(empty: Boolean = false, private val wordlist: List<String> = em
         when (req.coin) {
             "btc" -> addressToScript(req.dest.trim(), "tb", false, cfg.btcB58)
             "ltc" -> addressToScript(req.dest.trim(), "tltc", false, cfg.ltcB58)
+            "sol" -> Sol.parseAddress(req.dest)
             "prl" -> addressToScript(req.dest.trim(), "tprl", true)
             "tron" -> tronDecode(req.dest.trim())
             "ton" -> Ton.parseAddress(req.dest, true)
@@ -92,6 +95,7 @@ class DemoWallet(empty: Boolean = false, private val wordlist: List<String> = em
             "btc" -> "0.00000424" to "tBTC"
             "prl" -> "0.00246824" to "tPRL"
             "ltc" -> "0.00000141" to "tLTC"
+            "sol" -> "0.000005" to "devSOL"
             "tron" -> (req.feeLimit ?: "40") to "TRX"  // в демо оценки нет
             "eth" -> "0.000042" to "SepoliaETH"
             "ton" -> "≈0.0045" to "tGRAM"

@@ -58,8 +58,9 @@ CHAINS = {
     "prl": {"name": "Pearl", "color": "#B9C7DA", "net": {"testnet": "testnet2", "mainnet": "mainnet"}},
     "ton": {"name": "TON", "color": "#0098EA", "net": {"testnet": "testnet", "mainnet": "mainnet"}},
     "ltc": {"name": "Litecoin", "color": "#345D9D", "net": {"testnet": "testnet", "mainnet": "mainnet"}},
+    "sol": {"name": "Solana", "color": "#9945FF", "net": {"testnet": "devnet", "mainnet": "mainnet"}},
 }
-ORDER = ["btc", "prl", "ltc", "tron", "bsc", "ton"]
+ORDER = ["btc", "prl", "ltc", "sol", "tron", "bsc", "ton"]
 MONO = "JetBrains Mono, Cascadia Mono, Consolas, Menlo, DejaVu Sans Mono, monospace"
 
 QSS = f"""
@@ -204,6 +205,17 @@ def coin_icon(kind, size=40):
             p.rotate(45)
             for dx, dy, w in ((0, 0, 6), (-7.5, -7.5, 4), (7.5, 7.5, 4), (-7.5, 7.5, 4), (7.5, -7.5, 4)):
                 p.drawRect(QRectF((dx - w / 2) * s, (dy - w / 2) * s, w * s, w * s))
+        elif kind == "sol":  # три наклонные полосы
+            p.setPen(Qt.NoPen)
+            p.setBrush(white)
+            for y in (12, 18.5, 25):
+                path = QPainterPath()
+                path.moveTo(13 * s, (y + 3) * s)
+                path.lineTo(16 * s, y * s)
+                path.lineTo(28 * s, y * s)
+                path.lineTo(25 * s, (y + 3) * s)
+                path.closeSubpath()
+                p.drawPath(path)
         elif kind == "ltc":  # Ł
             f = QFont()
             f.setPixelSize(int(22 * s))
@@ -448,8 +460,8 @@ class Task(QRunnable):
 
 class DemoWallet:
     """Тот же интерфейс, что у wallet.Wallet, но без устройства и сети."""
-    net, coins, ready, chain_id = "testnet", ["btc", "tron", "bsc", "prl", "ton", "ltc"], True, 97
-    info = {"fw": "0.5", "net": "testnet", "state": "ready", "coins": "btc,tron,bsc,prl,ton,ltc", "bsc_chain": "97",
+    net, coins, ready, chain_id = "testnet", ["btc", "tron", "bsc", "prl", "ton", "ltc", "sol"], True, 97
+    info = {"fw": "0.5", "net": "testnet", "state": "ready", "coins": "btc,tron,bsc,prl,ton,ltc,sol", "bsc_chain": "97",
             "hw": "esp32s3", "batt": "3920"}
     cfg = W.NETS["testnet"]
     ADDR = {"btc": "tb1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu",
@@ -457,7 +469,8 @@ class DemoWallet:
             "bsc": "0x9858EfFD232B4033E47d90003D41EC34EcaEda94",
             "prl": "tprl1pr6yuq8u2r95wjzzgpdy8cpnncpl7l8zgy6x5q0367pnc53s2famqg7pt74",
             "ton": "0QDxNqXW0IXweuExwOiUuybRpkO2hzOift66DtiHIobBIn_X",
-            "ltc": "tltc1q6rz28mcfaxtmd6v789l9rrlrusdprr9pesrjxk"}
+            "ltc": "tltc1q6rz28mcfaxtmd6v789l9rrlrusdprr9pesrjxk",
+            "sol": "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk"}
 
     def __init__(self, empty=False):
         self.dev = type("D", (), {"port": "demo"})()
@@ -492,7 +505,8 @@ class DemoWallet:
              "bsc": [{"id": "usdt", "symbol": "USDT", "decimals": 18, "amount": 75 * 10**18},
                      {"id": "bnb", "symbol": "tBNB", "decimals": 18, "amount": 3 * 10**16}],
              "ton": [{"id": "gram", "symbol": "tGRAM", "decimals": 9, "amount": 12_340_000_000}],
-             "ltc": [{"id": "ltc", "symbol": "tLTC", "decimals": 8, "amount": 87_500_000}]}[coin]
+             "ltc": [{"id": "ltc", "symbol": "tLTC", "decimals": 8, "amount": 87_500_000}],
+             "sol": [{"id": "sol", "symbol": "devSOL", "decimals": 9, "amount": 2_500_000_000}]}[coin]
         pend = 225_390_153_581 if coin == "prl" else 0
         return {"address": self.ADDR[coin], "assets": a, "pending": pend, "notes": []}
 
@@ -506,11 +520,12 @@ class DemoWallet:
         time.sleep(.8)
         {"btc": lambda: W.address_to_script(dest, "tb", False, W.NETS["testnet"]["btc_b58"]),
          "ltc": lambda: W.address_to_script(dest, "tltc", False, W.NETS["testnet"]["ltc_b58"]),
-         "prl": lambda: W.address_to_script(dest, "tprl", True),
+         "prl": lambda: W.address_to_script(dest, "tprl", True), "sol": lambda: W.SOL.parse_address(dest),
          "tron": lambda: W.tron_decode(dest), "bsc": lambda: W.evm_decode(dest),
          "ton": lambda: W.T.parse_address(dest, True)}[coin]()
         asset = asset or W.COINS[coin]["assets"][0][0]
         fee = {"btc": ("0.00000424", "tBTC"), "prl": ("0.00246824", "tPRL"), "ltc": ("0.00000141", "tLTC"),
+               "sol": ("0.000005", "devSOL"),
                "tron": (str(fee_limit or 40), "TRX"), "bsc": ("0.00000612", "tBNB"), "ton": ("≈0.0045", "tGRAM")}[coin]
         return W.Draft(coin, asset, self.symbol(asset), self.ADDR[coin], dest.strip(), amount,
                        fee[0], fee[1], fee_label="Макс. комиссия" if coin in ("tron", "bsc") else "Комиссия",
@@ -522,7 +537,7 @@ class DemoWallet:
         raw, txid = draft.sign()
         if broadcast:
             draft.broadcast(raw)
-        return {"raw": raw, "txid": txid, "url": draft.tx_url + txid if broadcast else "",
+        return {"raw": raw, "txid": txid, "url": draft.tx_url.replace("{txid}", txid) if broadcast else "",
                 "broadcast": broadcast}
 
 
@@ -630,8 +645,8 @@ class ChainCard(QFrame):
             ic = QLabel()
             ic.setPixmap(coin_icon("usdt" if a["id"] == "usdt" else self.coin, 26))
             h.addWidget(ic)
-            std = {"tron": "TRC20", "bsc": "BEP20", "ton": "TON"}.get(self.coin, "")
-            name = a["symbol"] + ("  ·  " + std if a["id"] == "usdt" else "")
+            std = {"tron": "TRC20", "bsc": "BEP20", "ton": "TON", "sol": "SPL"}.get(self.coin, "")
+            name = a["symbol"] + ("  ·  " + std if a["id"] in ("usdt", "usdc") else "")
             h.addWidget(label(name, "muted"))
             h.addStretch()
             h.addWidget(label(W.fmt_units(a["amount"], a["decimals"]), "big"))
@@ -1013,7 +1028,7 @@ class SendPage(Page):
         self.asset.set_items(assets)
         self.asset.setVisible(len(assets) > 1)
         self.asset_label.setVisible(len(assets) > 1)
-        hints = {"btc": "bc1…, 1… или 3…", "ltc": "ltc1…, L… или M…", "prl": "prl1p… (Taproot)", "tron": "T…", "bsc": "0x…", "ton": "UQ… или EQ…"}
+        hints = {"btc": "bc1…, 1… или 3…", "ltc": "ltc1…, L… или M…", "sol": "base58, 32–44 символа", "prl": "prl1p… (Taproot)", "tron": "T…", "bsc": "0x…", "ton": "UQ… или EQ…"}
         self.dest.setPlaceholderText(f"Адрес {CHAINS[coin]['name']}: {hints[coin]}")
         self.fee_levels = {}
         self.update_form()
@@ -1049,6 +1064,10 @@ class SendPage(Page):
             self.fee_title.setText("Лимит комиссии, TRX" if asset == "usdt" else "Комиссия")
             self.fee_info.setText("Энергия оплачивается сжиганием TRX; это верхняя граница. Пусто — по оценке сети"
                                   if asset == "usdt" else "Оценка — на следующем шаге: bandwidth, новому адресу +1 TRX")
+        elif coin == "sol":
+            self.fee_title.setText("Комиссия")
+            self.fee_info.setText("5000 lamports за подпись и немного за приоритет: около 0.000005 SOL" if asset == "sol" else
+                                  "Около 0.00001 SOL; если у получателя нет счёта этого токена — ещё 0.002 SOL (рента)")
         elif coin == "ton":
             self.fee_title.setText("Комиссия")
             self.fee_info.setText("Тысячные доли GRAM; для USDT ещё 0.05 GRAM на пересылку жетона (лишнее вернётся)"
@@ -1070,13 +1089,18 @@ class SendPage(Page):
             try:
                 {"btc": lambda: W.address_to_script(text, cfg["hrp"], False, cfg["btc_b58"]),
                  "ltc": lambda: W.address_to_script(text, cfg["ltc_hrp"], False, cfg["ltc_b58"]),
+                 "sol": lambda: W.SOL.parse_address(text),
                  "prl": lambda: W.address_to_script(text, cfg["prl_hrp"], True),
                  "tron": lambda: W.tron_decode(text), "bsc": lambda: W.evm_decode(text),
                  "ton": lambda: W.T.parse_address(text, self.app.wallet.net != "mainnet" if self.app.wallet else True)}[coin]()
                 self.dest_hint.setText("✓  Адрес корректный")
                 self.dest_hint.setStyleSheet(f"color: {C['ok']}; font-size: 12px;")
+                m = W.ltc_old_p2sh(text, self.app.wallet.net if self.app.wallet else "testnet") if coin == "ltc" else None
+                if m:  # старый P2SH — такой же у Bitcoin
+                    self.dest_hint.setText("⚠  " + W.LTC_OLD_P2SH_NOTE.format(m))
+                    self.dest_hint.setStyleSheet(f"color: {C['warn']}; font-size: 12px;")
                 ok = True
-            except (W.WalletError, W.T.TonError) as e:
+            except (W.WalletError, W.T.TonError, W.SOL.SolError) as e:
                 self.dest_hint.setText(str(e))
                 self.dest_hint.setStyleSheet(f"color: {C['bad']}; font-size: 12px;")
         try:

@@ -150,6 +150,27 @@ fun b58checkDecode(addr: String): ByteArray {
     return body
 }
 
+/** Старый P2SH Litecoin «3…» (testnet «2…»): такой же, как у Bitcoin. -> тот же адрес как M…/Q…,
+ *  иначе null. Устройство покажет именно M… — с ним и сверять (как ltc_old_p2sh в wallet.py). */
+fun ltcOldP2sh(addr: String, net: String): String? {
+    val body = try { b58checkDecode(addr.trim()) } catch (e: WalletError) { return null }
+    val (old, new) = if (net == "mainnet") 0x05 to 0x32 else 0xC4 to 0x3A
+    if (body.size != 21 || (body[0].toInt() and 0xFF) != old) return null
+    val b = byteArrayOf(new.toByte()) + body.copyOfRange(1, 21)
+    val full = b + dsha(b).copyOfRange(0, 4)
+    var n = BigInteger(1, full)
+    val sb = StringBuilder()
+    while (n.signum() > 0) {
+        val (q, r) = n.divideAndRemainder(BigInteger.valueOf(58))
+        sb.append(B58[r.toInt()])
+        n = q
+    }
+    return sb.reverse().toString()
+}
+
+const val LTC_OLD_P2SH_NOTE = "Адрес формата 3… такой же у Bitcoin: убедись, что получатель ждёт именно Litecoin. " +
+    "Устройство покажет его как %s"
+
 /** Адрес -> scriptPubKey. b58 — старые адреса сети: P2PKH 76a914<20>88ac и P2SH a914<20>87. */
 fun addressToScript(addr: String, hrp: String, pearl: Boolean = false, b58: B58Versions? = null): ByteArray {
     if (b58 != null && !addr.lowercase().startsWith(hrp + "1")) {
