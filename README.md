@@ -301,6 +301,8 @@ python3 tools/sim/test_apps.py mwsim   # тесты: установка, под�
 python3 tools/sim/test_golden.py mwsim mwsim-mainnet   # монеты = прежняя прошивка, байт в байт
 python3 tools/sim/test_curves.py mwsim # ed25519 и sr25519 по эталонам
 python3 tools/sim/test_store.py mwsim  # хранилище: дыры, заполнение, сбой посреди обновления
+python3 tools/sim/test_tron.py mwsim   # TRON: memo, TRC10, оценка комиссии
+python3 tools/sim/test_btcd.py mwsim   # совместимость адресов PRL с Pearl Wallet (btcd #172)
 ```
 
 Приложение — папка `apps/<id>/` с `<id>.c` (функция `mw_main`) и `manifest`:
@@ -401,9 +403,16 @@ PSBT разбирает хост (`host/psbt.py`, `android/…/core/Psbt.kt`, BI
 `fingerprint`.
 
 **Майнинг Pearl.** Возьми адрес из `prl receive` (сверь с экраном) и укажи его как адрес
-выплат в пуле или в `pearld --miningaddr`. Pearl Wallet с теми же словами покажет те же
-адреса (BIP86, `m/86'/808276'/0'`). Награда за блок доступна через 100 блоков, `prl balance`
-показывает её отдельно. Устройство подписывает до 64 входов за раз.
+выплат в пуле или в `pearld --miningaddr`. Награда за блок доступна через 100 блоков,
+`prl balance` показывает её отдельно. Устройство подписывает до 64 входов за раз.
+
+**Pearl Wallet с теми же словами.** Адреса — BIP86, `m/86'/808276'/0'`. Но Pearl Wallet
+(oyster, форк btcwallet) выводит ключи функцией btcd `DeriveNonStandard` (ошибка btcd #172):
+если у промежуточного ключа `m/86'` или `m/86'/808276'` первый байт нулевой, его адреса другие.
+Так бывает примерно у 0.8 % фраз. Проверка — `wallet.py prl compat` или «Устройство → Pearl
+Wallet» в приложениях: устройство отвечает одним битом, ключи не раскрываются. Монетам на
+адресах устройства это не грозит — их подписывает устройство; просто восстановление фразы в
+Pearl Wallet их не покажет.
 
 `--dry-run` подписывает транзакцию, но не отправляет её. USDT-TRC20 тратит энергию,
 которая оплачивается сжиганием TRX; новый TRON-адрес нужно активировать (1 TRX). Сколько TRX
@@ -543,7 +552,8 @@ android/        приложение для Android: core/ (кошелёк, се
 
 Протокол (строки по USB или внутри BLE-канала). `show`, `sign`, `wipe`, `restore` ждут
 подтверждения на устройстве, отказ — `err rejected`:
-`ping`, `info`, `wipe`, `boot`, `restore <entropy hex>`;
+`ping`, `info`, `wipe`, `boot`, `restore <entropy hex>`, `fingerprint`,
+`btcd <i[h]> …` (совпадёт ли вывод пути у btcd/Pearl Wallet: `ok same` / `ok differs`);
 BTC: `app btc xpub`, `app btc addr|show <chain> <i>`, `app btc sign @` (запрос и предыдущие транзакции блоком; формат — в начале `apps/utxo/utxo.c`);
 PRL: `app prl addr|show <chain> <i>`, `app prl sign @` (или `sign <hex>`, если запрос влезает в строку);
 TRON: `app tron addr|show <i>`, `app tron sign <i> <raw_data hex> [оценка комиссии, sun]`;

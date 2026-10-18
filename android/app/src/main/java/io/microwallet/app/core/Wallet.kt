@@ -90,6 +90,9 @@ interface WalletApi {
     fun removeApp(id: String) {
         throw WalletError("Приложения недоступны")
     }
+    /** Покажет ли Pearl Wallet с той же фразой те же адреса PRL (он выводит ключи btcd-функцией
+     *  DeriveNonStandard, у ~0.8 % фраз адреса другие). Ключи не раскрываются — один бит. */
+    fun pearlWalletSame(): Boolean = throw WalletError("Нужно устройство")
     /** Watch-only кошелёк для Sparrow/Electrum: дескриптор wpkh с отпечатком, путём и xpub (BIP380). */
     fun descriptor(): String = throw WalletError("Нужно устройство с приложением Bitcoin")
     /** PSBT (двоичный или base64) -> (подписанный PSBT base64, сырая транзакция при finalize). */
@@ -248,6 +251,16 @@ class Wallet(
         dev.call("app rm $id")
         addrCache.keys.removeAll { it.startsWith("$id/") }
         apps()
+    }
+
+    override fun pearlWalletSame(): Boolean {
+        val c = if (net == "mainnet") 808276 else 1
+        return try {
+            dev.call("btcd 86h ${c}h 0h") == "same"
+        } catch (e: WalletError) {
+            if ("unknown command" in (e.message ?: "")) throw WalletError("Проверка есть в прошивке 0.7.3 и новее — обнови устройство")
+            throw e
+        }
     }
 
     // ---- PSBT (Sparrow, Electrum): то же, что host/wallet.py sign_psbt ----

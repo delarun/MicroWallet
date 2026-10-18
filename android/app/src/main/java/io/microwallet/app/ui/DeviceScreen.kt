@@ -155,6 +155,10 @@ fun DeviceScreen(vm: AppViewModel) {
             PsbtCard(vm)
             Spacer(Modifier.height(14.dp))
         }
+        if (w.ready && "prl" in vm.coins && !vm.isDemo) {
+            PearlCard(vm)
+            Spacer(Modifier.height(14.dp))
+        }
         AppUpdateCard(vm)
         Spacer(Modifier.height(14.dp))
         Card {
@@ -330,5 +334,33 @@ fun RestoreScreen(vm: AppViewModel) {
             SecondaryButton("Отмена", { vm.showRestore = false }, Modifier.fillMaxWidth(), enabled = !busy)
         }
         Spacer(Modifier.height(16.dp))
+    }
+}
+
+/** Pearl Wallet выводит ключи нестандартно (btcd #172): у части фраз его адреса PRL другие. */
+@Composable
+private fun PearlCard(vm: AppViewModel) {
+    Card {
+        Text("Pearl Wallet", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(6.dp))
+        when (vm.pearlSame) {
+            true -> Text("✓  Совместимо: Pearl Wallet с этой фразой покажет те же адреса PRL.",
+                color = C.ok, fontSize = 13.sp, lineHeight = 19.sp)
+            false -> Text(
+                "Не совместимо: Pearl Wallet с этой фразой покажет другие адреса PRL. Монеты на адресах " +
+                    "устройства в безопасности, но тратить их нужно этим устройством.",
+                color = C.warn, fontSize = 13.sp, lineHeight = 19.sp,
+            )
+            null -> {
+                Text(
+                    "Pearl Wallet выводит ключи нестандартно, и примерно у 0.8 % фраз его адреса PRL отличаются " +
+                        "от адресов устройства. Проверка не раскрывает ключи.",
+                    color = C.muted, fontSize = 13.sp, lineHeight = 19.sp,
+                )
+                Spacer(Modifier.height(12.dp))
+                SecondaryButton(if (vm.pearlChecking) "Проверяю…" else "Проверить совместимость", { vm.checkPearl() },
+                    Modifier.fillMaxWidth())
+            }
+        }
     }
 }

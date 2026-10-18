@@ -1333,6 +1333,22 @@ class DevicePage(Page):
         pv.addLayout(pr)
         grid.addWidget(pc)
 
+        # ---- Pearl: совместимость адресов с Pearl Wallet ----
+        self.pearl_card = card()
+        qv = QVBoxLayout(self.pearl_card)
+        qv.setContentsMargins(24, 18, 24, 18)
+        qv.addWidget(label("Pearl Wallet", "h2"))
+        self.pearl_info = label("Pearl Wallet выводит ключи нестандартно, и примерно у 0.8 % фраз его адреса PRL "
+                                "отличаются от адресов устройства. Проверка не раскрывает ключи.", "muted", wrap=True)
+        qv.addWidget(self.pearl_info)
+        qr = QHBoxLayout()
+        self.pearl_btn = button("Проверить совместимость")
+        self.pearl_btn.clicked.connect(self.do_pearl)
+        qr.addWidget(self.pearl_btn)
+        qr.addStretch()
+        qv.addLayout(qr)
+        grid.addWidget(self.pearl_card)
+
         logc = card()
         lv = QVBoxLayout(logc)
         lv.setContentsMargins(20, 18, 20, 18)
@@ -1365,7 +1381,7 @@ class DevicePage(Page):
         if not w:
             self.sub.setText(self.app.conn_error or "не подключено")
             self.net_badge.clear()
-            for b in (self.boot, self.wipe, self.update_btn, self.desc_btn, self.psbt_btn):
+            for b in (self.boot, self.wipe, self.update_btn, self.desc_btn, self.psbt_btn, self.pearl_btn):
                 b.setEnabled(False)
             return
         i = w.info
@@ -1396,6 +1412,8 @@ class DevicePage(Page):
         psbt_ok = real and getattr(w, "ready", False) and "btc" in getattr(w, "coins", [])
         self.desc_btn.setEnabled(psbt_ok)
         self.psbt_btn.setEnabled(psbt_ok)
+        self.pearl_card.setVisible("prl" in getattr(w, "coins", []))
+        self.pearl_btn.setEnabled(real and getattr(w, "ready", False))
 
     def do_boot(self):
         self.app.run(self.app.wallet.dev.call, "boot", done=lambda _: self.app.disconnected(
@@ -1409,6 +1427,15 @@ class DevicePage(Page):
                 UpdateDialog(self.app, path).exec()
             except OSError as e:
                 self.app.toast(f"Не удалось прочитать файл: {e}")
+
+    def do_pearl(self):
+        def done(same):
+            self.pearl_info.setText(
+                "✓  Совместимо: Pearl Wallet с этой фразой покажет те же адреса PRL." if same else
+                "Не совместимо: Pearl Wallet с этой фразой покажет другие адреса PRL. Монеты на адресах "
+                "устройства в безопасности, но тратить их нужно этим устройством.")
+            self.pearl_info.setStyleSheet(f"color: {C['ok' if same else 'warn']};")
+        self.app.run(self.app.wallet.pearl_wallet_same, done=done, failed=lambda e: self.app.toast(human(e)))
 
     def do_descriptor(self):
         w = self.app.wallet

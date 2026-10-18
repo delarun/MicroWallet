@@ -186,6 +186,22 @@ static bool path_node(const uint32_t *path, int depth, hdnode_t *out) {
   return ok;
 }
 
+bool wallet_path_btcd_same(const uint32_t *path, int depth, bool *same) {
+  if (!g_unlocked || depth < 1 || depth > WALLET_PATH_MAX) return false;
+  hdnode_t a = g_master, b;
+  bool ok = true;
+  *same = true;
+  for (int i = 0; i < depth && ok; i++) {
+    // корень NewMaster хранит все 32 байта — расходятся только выведенные узлы
+    if (i > 0 && (path[i] & HARDENED) && a.priv[0] == 0) *same = false;
+    ok = ckd_priv(&a, path[i], &b);
+    a = b;
+  }
+  memzero(&a, sizeof a);
+  memzero(&b, sizeof b);
+  return ok;
+}
+
 bool wallet_path_key(const uint32_t *path, int depth, uint8_t priv[32], uint8_t pub65[65]) {
   hdnode_t n;
   if (depth < 1 || !path_node(path, depth, &n)) return false;

@@ -17,6 +17,7 @@ MicroWallet: библиотека для общения с устройство�
   python wallet.py btc  receive [-i N] | balance | xpub
   python wallet.py btc  send ADDR SATS [--feerate SAT_PER_VB] [--dry-run]
 
+  python wallet.py prl compat             # покажет ли Pearl Wallet с этой фразой те же адреса
   python wallet.py tron receive [-i N] | balance [-i N]
   python wallet.py tron send ADDR AMOUNT [--token usdt|trx|trc10:ID] [--fee-limit TRX] [--memo TEXT] [--dry-run]
 
@@ -826,6 +827,20 @@ class Wallet:
 
     # ================= BTC и Pearl =================
 
+    # ================= Pearl Wallet =================
+
+    def pearl_wallet_same(self):
+        """True — Pearl Wallet с той же фразой покажет те же адреса PRL. False — другие: он
+        выводит ключи btcd-функцией DeriveNonStandard (btcd #172), так бывает у ~0.8 % фраз.
+        Монеты на адресах устройства от этого не теряются — их подписывает устройство."""
+        c = 808276 if self.net == "mainnet" else 1
+        try:
+            return self.dev.call(f"btcd 86h {c}h 0h") == "same"
+        except WalletError as e:
+            if "unknown command" in str(e):
+                raise WalletError("Проверка есть в прошивке 0.7.3 и новее — обнови устройство") from e
+            raise
+
     # ================= PSBT (Sparrow, Electrum) =================
 
     def fingerprint(self):
@@ -1292,7 +1307,7 @@ def main():
         cs = cp.add_subparsers(dest="action", required=True)
         for act in actions:
             ap = cs.add_parser(act)
-            if act not in ("xpub", "descriptor", "psbt-sign"):
+            if act not in ("xpub", "descriptor", "psbt-sign", "compat"):
                 ap.add_argument("-i", "--index", type=int, default=0, help="номер адреса")
             if act == "psbt-sign":
                 ap.add_argument("psbt", help="файл PSBT (двоичный или base64), - — из stdin")
@@ -1320,7 +1335,7 @@ def main():
         ap.add_argument("--gas-price", type=Decimal, help="gwei (по умолчанию eth_gasPrice)")
     coin("bsc", ["receive", "balance", "send"], "сумма, например 12.5", bsc_opts)
 
-    coin("prl", ["receive", "balance", "send"], "сумма в PRL, например 12.5",
+    coin("prl", ["receive", "balance", "send", "compat"], "сумма в PRL, например 12.5",
          lambda ap: ap.add_argument("--feerate", type=Decimal,
                                     help="grain/vB (по умолчанию оценка сети, минимум 1)"))
 
@@ -1400,6 +1415,13 @@ def main():
                       else ", seed на устройстве не зашифрован") + " !!", file=sys.stderr)
             if a.action == "xpub":
                 print(dev.call(w.cmd("btc", "xpub")))
+            elif a.action == "compat":
+                if w.pearl_wallet_same():
+                    print("Совместимо: Pearl Wallet с этой фразой покажет те же адреса PRL.")
+                else:
+                    print("НЕ совместимо: Pearl Wallet выводит ключи нестандартно (btcd #172), и с этой фразой\n"
+                          "покажет другие адреса PRL. Монеты на адресах устройства в безопасности — тратить их\n"
+                          "надо этим устройством; восстановление фразы в Pearl Wallet их не покажет.")
             elif a.action == "descriptor":
                 print(w.descriptor())
                 print("Sparrow: File → New Wallet → Watch Only → Output Descriptor; "

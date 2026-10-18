@@ -21,6 +21,11 @@ bool wallet_path_key(const uint32_t *path, int depth, uint8_t priv[32], uint8_t 
 // ECDSA secp256k1 (RFC 6979, low-s): sig = r || s, recid = 0/1
 bool wallet_path_sign(const uint32_t *path, int depth, const uint8_t digest[32], uint8_t sig[64],
                       uint8_t *recid);
+// Совпадёт ли вывод пути у btcd/btcutil DeriveNonStandard (Pearl Wallet, oyster): он хэширует
+// приватный ключ выведенного (не корневого) родителя без ведущих нулевых байтов, и hardened-
+// потомки такого узла у него другие (btcd #172). *same = false — адреса Pearl Wallet с той же
+// фразой будут не такими, как у нас. Наружу — один бит, ключи не раскрываются.
+bool wallet_path_btcd_same(const uint32_t *path, int depth, bool *same);
 // Расширенный публичный ключ узла (version: xpub/zpub/vpub …) в base58check
 bool wallet_path_xpub(const uint32_t *path, int depth, uint32_t version, char *out, size_t outlen);
 void hash160(const uint8_t *in, size_t len, uint8_t out[20]);  // RIPEMD160(SHA256(x))

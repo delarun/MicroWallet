@@ -348,6 +348,22 @@ static void handle(char *line) {
     else reply("ok %08lx", (unsigned long)fp);
     return;
   }
+  if (!strcmp(cmd, "btcd")) {  // btcd 86h 808276h 0h: совпадут ли адреса с Pearl Wallet (btcd)
+    uint32_t path[WALLET_PATH_MAX];
+    int depth = 0;
+    bool bad = false, same;
+    for (char *t = a1; t && !bad; t = strtok(NULL, " ")) {
+      char *e;
+      unsigned long v = strtoul(t, &e, 10);
+      bool hard = *e == 'h' || *e == '\'';
+      if (e == t || v >= 0x80000000UL || depth >= WALLET_PATH_MAX || e[hard] != 0) bad = true;
+      else path[depth++] = (uint32_t)v | (hard ? 0x80000000UL : 0);
+    }
+    if (bad || !depth) reply("err usage: btcd <index[h]> ...");
+    else if (!wallet_path_btcd_same(path, depth, &same)) reply("err no wallet on device");
+    else reply(same ? "ok same" : "ok differs");
+    return;
+  }
   if (!strcmp(cmd, "addrs")) {  // addrs <1|5|10|20>: сколько адресов для получения
     if (!a1 || !menu_set_addr_count(atoi(a1))) {
       reply("err usage: addrs 1|5|10|20");

@@ -238,6 +238,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         transport = null
         conn = Conn.Idle
         balances.clear()
+        pearlSame = null
         info = emptyMap()
         send.reset()
         showRestore = false
@@ -580,6 +581,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             psbt.phase = "error"
             psbt.error = "Подписано, но сеть не приняла: $it"
         })
+    }
+
+    /** Совместимость адресов PRL с Pearl Wallet: null — не проверяли. */
+    var pearlSame by mutableStateOf<Boolean?>(null)
+    var pearlChecking by mutableStateOf(false)
+
+    fun checkPearl() {
+        val w = wallet ?: return
+        pearlChecking = true
+        run({ w.pearlWalletSame() }, { pearlSame = it; pearlChecking = false }, { message = it; pearlChecking = false })
     }
 
     fun loadDescriptor() {

@@ -138,6 +138,17 @@ class SimTest {
         dev.close()
     }
 
+    /** Pearl Wallet (btcd DeriveNonStandard): у фразы с энтропией …8e аккаунт PRL выводится иначе. */
+    @Test
+    fun pearlWallet() {
+        for ((entropy, same) in listOf("00".repeat(16) to true, "0".repeat(30) + "8e" to false)) {
+            val dev = LineDevice(Sim.start("lines", Sim.newDir()))
+            dev.call("restore $entropy")
+            assertEquals(entropy, same, Wallet(dev, FakeHttp(JSONObject()), Sim.words).pearlWalletSame())
+            dev.close()
+        }
+    }
+
     @Test
     fun vectors() {
         val dir = Sim.newDir()
