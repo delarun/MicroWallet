@@ -37,9 +37,16 @@ build t "sdkconfig.defaults" testnet
 build m "sdkconfig.defaults;sdkconfig.mainnet" mainnet
 build ts "sdkconfig.defaults;sdkconfig.secure;$B/key.cfg" testnet-secure
 build ms "sdkconfig.defaults;sdkconfig.mainnet;sdkconfig.secure;$B/key.cfg" mainnet-secure
+# Загрузчик ESP-IDF доверяет ключу из слота eFuse №k, только если у образа есть блок
+# подписи №k (secure_boot_signatures_bootloader.c): релизный ключ — в слоте 1, поэтому
+# образу нужны блоки 0 и 1. Подписываем релизным ключом дважды — иначе обновление
+# запишется, а плата загрузит прежнюю прошивку.
 for n in testnet-secure mainnet-secure; do
-  espsecure.py verify_signature --version 2 --keyfile "$KEY" "$OUT/microwallet-esp32s3-$n-app.bin" 2>&1 \
-    | grep -q "verification successful" || { echo "$n: подпись не сходится"; exit 1; }
+  f="$OUT/microwallet-esp32s3-$n-app.bin"
+  espsecure.py sign_data --version 2 --append_signatures --keyfile "$KEY" -o "$f.2" "$f" >/dev/null
+  mv "$f.2" "$f"
+  [ "$(espsecure.py verify_signature --version 2 --keyfile "$KEY" "$f" 2>&1 | grep -c "verification successful")" = 2 ] \
+    || { echo "$n: нужны две подписи релизным ключом"; exit 1; }
 done
 for v in "t testnet" "m mainnet"; do
   set -- $v

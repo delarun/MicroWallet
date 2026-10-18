@@ -20,6 +20,7 @@ import io.microwallet.app.core.DEFAULT_REPO
 import io.microwallet.app.core.DemoWallet
 import io.microwallet.app.core.DeviceError
 import io.microwallet.app.core.AppUpdate
+import io.microwallet.app.core.Trace
 import io.microwallet.app.core.UrlHttp
 import io.microwallet.app.core.downloadAppUpdate
 import io.microwallet.app.core.findAppUpdate
@@ -135,6 +136,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 done(withContext(Dispatchers.IO) { op() })
             } catch (e: Exception) {
+                Trace.log("failed: ${e.javaClass.simpleName}: ${e.message}")
                 failed(human(e))
             }
         }
@@ -366,7 +368,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             apps.installed = Load.Ok(it)
             coinsVersion++
         }, {
-            message = it
+            message = "Порядок не сохранён: $it"
             loadInstalled()
         })
     }
@@ -467,6 +469,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---------------- данные ----------------
+
+    /** Обновить вручную (потянуть вниз): мимо кэша балансов. */
+    fun refreshNow() {
+        wallet?.forgetCache()
+        refresh()
+    }
 
     fun refresh() {
         val w = wallet ?: return

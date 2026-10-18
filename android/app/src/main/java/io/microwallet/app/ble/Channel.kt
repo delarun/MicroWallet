@@ -6,6 +6,7 @@ package io.microwallet.app.ble
 
 import io.microwallet.app.core.Device
 import io.microwallet.app.core.DeviceError
+import io.microwallet.app.core.Trace
 import io.microwallet.app.core.WalletError
 import io.microwallet.app.core.parseReply
 import io.microwallet.app.core.sha256
@@ -156,8 +157,17 @@ class Channel(
 
     /** Команда и ответ. timeoutMs = null: ждать, пока человек нажимает кнопку на устройстве. */
     fun call(line: String, timeoutMs: Long? = null): String {
-        sendLine(line)
-        return recvData(timeoutMs)
+        val t0 = System.currentTimeMillis()
+        val what = Trace.cmd(line)
+        try {
+            sendLine(line)
+            val r = recvData(timeoutMs)
+            Trace.log("ble $what -> ${if (r.startsWith("ok")) "ok" else r.take(80)} (${System.currentTimeMillis() - t0} ms)")
+            return r
+        } catch (e: Exception) {
+            Trace.log("ble $what -> ${e.javaClass.simpleName}: ${e.message} (${System.currentTimeMillis() - t0} ms)")
+            throw e
+        }
     }
 
     /** Следующий ответ (для отправки строк конвейером: sendLine подряд, ответы по порядку). */
@@ -198,15 +208,23 @@ class BleDevice(
     /** До window строк в полёте: радио не простаивает, пока устройство пишет флеш. */
     @Synchronized
     override fun stream(lines: List<String>, window: Int, onReply: (Int) -> Unit) {
+        Trace.log("ble stream ${lines.size} lines, window $window")
         var sent = 0
         var got = 0
         while (got < lines.size) {
             while (sent < lines.size && sent - got < window) channel.sendLine(lines[sent++])
-            val r = channel.recvLine(60_000)
+            val r = try {
+                channel.recvLine(60_000)
+            } catch (e: Exception) {
+                Trace.log("ble stream: no reply to line ${got + 1}/${lines.size}: ${e.message}")
+                throw e
+            }
             got++
+            if (got % 25 == 0 || got == lines.size) Trace.log("ble stream $got/${lines.size}")
             try {
                 parseReply(r)
             } catch (e: DeviceError) {
+                Trace.log("ble stream: line $got/${lines.size} -> err ${e.message}")
                 repeat(sent - got) { runCatching { channel.recvLine(60_000) } }  // дочитать отправленное
                 throw e
             }

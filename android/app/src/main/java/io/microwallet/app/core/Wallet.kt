@@ -101,6 +101,8 @@ interface WalletApi {
     /** Сколько адресов для получения — настройка устройства «Addresses» (info addrs=):
      *  столько показывает «Получить» и столько проверяется для баланса. */
     val addrCount: Int get() = info["addrs"]?.toIntOrNull()?.coerceIn(1, 20) ?: ADDRS_DEFAULT
+    /** Сбросить кэш балансов (обновление вручную). */
+    fun forgetCache() {}
     fun setAddrCount(n: Int) {
         throw WalletError("Настройка недоступна")
     }
@@ -302,10 +304,13 @@ class Wallet(
         // Сжатый поток (прошивки с v0.7): данных на ~40% меньше; старые ответят «unknown»
         // ещё до экрана подтверждения — тогда как раньше
         var z: ByteArray? = null
+        Trace.log("ota: image ${image.size} B, build ${img.buildId}, fw on device ${info["fw"]} ${info["build"]}")
         try {
             dev.call("ota zbegin ${image.size} ${img.sha256}")  // ждёт кнопку на устройстве
             z = deflate(image)
+            Trace.log("ota: zbegin ok, compressed ${z.size} B")
         } catch (e: DeviceError) {
+            Trace.log("ota: zbegin -> ${e.message}")
             if (e.message != "unknown ota command") throw e
         }
         if (z == null) try {
@@ -323,15 +328,19 @@ class Wallet(
                 // (данные приходили, пока плата пишет флеш). Сжатие даёт своё и так.
                 dev.stream(lines, 1) { k -> onProgress(minOf(image.size, (k.toLong() * image.size / lines.size).toInt()), image.size) }
             } catch (e: Exception) {
+                Trace.log("ota: stream failed: ${e.message}")
                 runCatching { dev.call("ota abort") }
                 throw e
             }
             try {
                 dev.call("ota end")
+                Trace.log("ota: end ok")
             } catch (e: DeviceError) {
+                Trace.log("ota: end -> ${e.message}")
                 throw e
             } catch (e: WalletError) {
                 // Устройство могло перезагрузиться раньше, чем дошёл ответ, — это успех
+                Trace.log("ota: end, no reply (rebooting?): ${e.message}")
             }
             return
         }
@@ -425,6 +434,9 @@ class Wallet(
     /** Последний скан по монете: повторное подключение или обновление в течение
      *  SCAN_TTL_MS не идёт в сеть. После отправки сбрасывается. */
     private val scans = HashMap<String, Pair<Long, Scan>>()
+
+    /** Обновление «потянуть вниз»: следующий баланс — из сети, а не из кэша. */
+    override fun forgetCache() = scans.clear()
 
     fun scan(coin: String): Scan {
         scans[coin]?.let { (at, s) -> if (System.currentTimeMillis() - at < SCAN_TTL_MS) return s }

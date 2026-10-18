@@ -62,7 +62,7 @@ fun OverviewScreen(vm: AppViewModel) {
         return
     }
     val loading = coins.any { vm.balances[it] == Load.Loading }
-    PullToRefreshBox(isRefreshing = loading, onRefresh = { vm.refresh() }, modifier = Modifier.fillMaxSize()) {
+    PullToRefreshBox(isRefreshing = loading, onRefresh = { vm.refreshNow() }, modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),

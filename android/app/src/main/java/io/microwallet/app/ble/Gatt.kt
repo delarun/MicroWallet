@@ -20,6 +20,7 @@ import android.content.Context
 import android.os.Build
 import android.os.ParcelUuid
 import android.util.Base64
+import io.microwallet.app.core.Trace
 import io.microwallet.app.core.WalletError
 import java.security.KeyStore
 import java.util.UUID
@@ -107,6 +108,7 @@ class GattTransport private constructor(
     private val cb = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             val up = newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS
+            Trace.log("gatt state=$newState status=$status${if (up) "" else " (disconnected)"}")
             events.put(Ev.State(up, status))
             if (!up) {
                 frames.put(ByteArray(0))
@@ -116,10 +118,14 @@ class GattTransport private constructor(
 
         override fun onMtuChanged(g: BluetoothGatt, value: Int, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) mtu = value
+            Trace.log("gatt mtu=$value status=$status")
             events.put(Ev.Mtu(value, status))
         }
 
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) = events.put(Ev.Services(status))
+
+        override fun onPhyUpdate(g: BluetoothGatt, txPhy: Int, rxPhy: Int, status: Int) =
+            Trace.log("gatt phy tx=$txPhy rx=$rxPhy status=$status")
 
         override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) =
             events.put(Ev.Written(status))
@@ -219,13 +225,19 @@ class GattTransport private constructor(
                 @Suppress("DEPRECATION")
                 g.writeCharacteristic(c)
             }
-            if (!ok) throw ChannelError("Bluetooth: запись не удалась")
+            if (!ok) {
+                Trace.log("gatt write rejected at $off/${data.size}")
+                throw ChannelError("Bluetooth: запись не удалась")
+            }
             val w = try {
                 expect<Ev.Written>(10_000, "запись")
             } catch (e: WalletError) {
                 throw ChannelError(e.message ?: "Bluetooth: запись не удалась")
             }
-            if (w.status != BluetoothGatt.GATT_SUCCESS) throw ChannelError("Bluetooth: запись не удалась (код ${w.status})")
+            if (w.status != BluetoothGatt.GATT_SUCCESS) {
+                Trace.log("gatt write status=${w.status} at $off/${data.size}")
+                throw ChannelError("Bluetooth: запись не удалась (код ${w.status})")
+            }
             off += part.size
         }
     }

@@ -51,12 +51,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.microwallet.app.core.Trace
 
 class MainActivity : ComponentActivity() {
     private val vm: AppViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Trace.sink = { android.util.Log.i("MicroWallet", it) }  // adb logcat -s MicroWallet
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(C.bg.toArgb()),
             navigationBarStyle = SystemBarStyle.dark(C.side.toArgb()),
