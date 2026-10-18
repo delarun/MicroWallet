@@ -249,6 +249,12 @@ void app_wipe(void) { wipe_flow(); }
 
 static uint64_t last_input;
 
+// Простой дольше ms? last_input может оказаться позже переданного now (его обновили по ходу
+// шага — например, после ввода PIN): беззнаковая разность ушла бы «в минус» и стала огромной
+static bool idle_longer(uint64_t now, uint32_t ms) {
+  return now > last_input && now - last_input > (uint64_t)ms * 1000;
+}
+
 // Пауза после нескольких ошибок: обратный отсчёт на экране (блокирующий)
 static void pin_wait(void) {
   for (uint32_t s = pin_delay_s(); s > 0; s--) {
@@ -382,7 +388,7 @@ static void lock_tick(void) {
     pin_entry_start(&g_lock_entry, "Enter PIN");
     g_lock_entry_on = true;
   }
-  if (btn_pressed()) last_input = now;
+  if (btn_pressed()) last_input = hal_time_us();
   if (pin_entry_step(&g_lock_entry)) {
     lock_check(g_lock_entry.d);
     memzero(&g_lock_entry, sizeof g_lock_entry);
@@ -679,7 +685,8 @@ void app_tick(void) {
   if (g_locked && !g_busy) {  // экран блокировки: кнопка — цифры PIN; экран не гаснет
     lock_tick();
     uint32_t poff = menu_power_off_ms();
-    if (poff && now - last_input > (uint64_t)poff * 1000 && !hal_usb_connected() && !hal_ble_connected() &&
+    // время — заново: lock_tick мог разблокировать устройство и обновить last_input
+    if (g_locked && poff && idle_longer(hal_time_us(), poff) && !hal_usb_connected() && !hal_ble_connected() &&
         !btn_pressed())
       app_power_off();
     return;
@@ -701,7 +708,7 @@ void app_tick(void) {
     else menu_event(b);
   }
   uint32_t off = menu_screen_off_ms();
-  if (off && !oled_is_asleep() && now - last_input > (uint64_t)off * 1000) oled_sleep();
+  if (off && !oled_is_asleep() && idle_longer(now, off)) oled_sleep();
 
   // Аккумулятор на исходе — выключиться, пока плата не зависла от просадки
   static uint64_t batt_checked;
@@ -717,7 +724,7 @@ void app_tick(void) {
 
   // Долгий простой — выключиться (глубокий сон), если никто не на связи
   uint32_t poff = menu_power_off_ms();
-  if (poff && now - last_input > (uint64_t)poff * 1000 && !hal_usb_connected() &&
+  if (poff && idle_longer(now, poff) && !hal_usb_connected() &&
       !hal_ble_connected() && !btn_pressed())
     app_power_off();
 
