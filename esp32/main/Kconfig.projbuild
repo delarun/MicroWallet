@@ -1,0 +1,69 @@
+menu "MicroWallet"
+
+config MW_MAINNET
+    bool "Mainnet (настоящие монеты!)"
+    default n
+    help
+        По умолчанию testnet. Без шифрования флеша (sdkconfig.secure) seed
+        хранится в NVS в открытом виде.
+
+config MW_OLED_SDA
+    int "GPIO SDA экрана"
+    default 8
+
+config MW_OLED_SCL
+    int "GPIO SCL экрана"
+    default 9
+
+config MW_OLED_I2C_HZ
+    int "Частота I2C экрана, Гц"
+    default 100000
+    help
+        100 кГц надёжно работает и на проводках; на коротких дорожках можно 400000.
+
+config MW_BTN_GPIO
+    int "GPIO кнопки (замыкает на GND)"
+    default 1
+    range 1 21
+    help
+        Кнопка между этим GPIO и GND; она же будит из выключения (глубокого сна):
+        будить могут только RTC-пины GPIO0..21. Не GPIO0: это BOOT, пин выбора
+        режима загрузки. Встроенная BOOT работает параллельно, но из сна не будит.
+
+config MW_LIGHT_SLEEP
+    bool "Лёгкий сон при простое (для работы от аккумулятора)"
+    default y
+    help
+        Когда экран погашен, чип спит между событиями; BLE остаётся на связи,
+        кнопка будит. Пока подключён компьютер по USB, сна нет.
+
+config MW_BATT_ENABLE
+    bool "Измерять напряжение аккумулятора"
+    default y
+    help
+        На S3 SuperMini делитель VBUS/2 (PR1/PR2, 100k/100k) уже стоит на плате
+        и заведён на GPIO3. Меньше 2.5 В — значок батареи не показывается.
+
+config MW_BATT_GPIO
+    int "GPIO делителя (АЦП1: GPIO1..10)"
+    default 3
+    depends on MW_BATT_ENABLE
+
+config MW_BATT_DIVIDER_X100
+    int "Коэффициент делителя x100"
+    # Делитель 100k/100k без конденсатора, АЦП занижает ~в 0.8 раза.
+    # Откалибровано: аккумулятор 3.93 В (мультиметр) и USB 5.0 В сходятся при 250.
+    default 250
+    depends on MW_BATT_ENABLE
+
+config MW_BATT_USB_MV
+    int "Порог внешнего питания на VBUS, мВ (выше — идёт зарядка)"
+    default 4500
+    depends on MW_BATT_ENABLE
+
+config MW_BATT_OFFSET_MV
+    int "Поправка к напряжению, мВ (падение на диоде между аккумулятором и VBUS)"
+    default 350
+    depends on MW_BATT_ENABLE
+
+endmenu

@@ -1,0 +1,32 @@
+# Защищённая сборка MicroWallet (добавляется поверх sdkconfig.defaults[;sdkconfig.mainnet]):
+#   idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.mainnet;sdkconfig.secure" build
+#
+# !!! Первая загрузка такой прошивки НЕОБРАТИМО прожигает eFuse платы:
+#   - Secure Boot v2 (RSA-3072): запустится только прошивка, подписанная ключом
+#     secure_boot_signing_key.pem (лежит рядом, в репозиторий не попадает — .gitignore);
+#   - шифрование флеша (ключ рождается в самой плате и не читается);
+#   - шифрование NVS (seed) ключами из зашифрованного раздела nvs_keys;
+#   - JTAG отключается.
+# Потеряешь ключ подписи — больше никогда не сможешь обновить эту плату.
+#
+# Сейчас — режим Development: ROM-загрузчик по USB остаётся и умеет писать флеш
+# зашифрованным (аварийное восстановление: esptool write_flash --encrypt подписанного
+# образа). Release — потом, отдельно, через espefuse (закрыть шифрование в загрузчике
+# ROM, дожечь SPI_BOOT_CRYPT_CNT, включить безопасный режим загрузки).
+
+CONFIG_SECURE_BOOT=y
+CONFIG_SECURE_BOOT_V2_ENABLED=y
+CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
+CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=y
+CONFIG_SECURE_BOOT_SIGNING_KEY="secure_boot_signing_key.pem"
+
+CONFIG_SECURE_FLASH_ENC_ENABLED=y
+CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y
+CONFIG_SECURE_FLASH_UART_BOOTLOADER_ALLOW_ENC=y
+CONFIG_SECURE_INSECURE_ALLOW_DL_MODE=y
+
+CONFIG_NVS_ENCRYPTION=y
+CONFIG_NVS_SEC_KEY_PROTECT_USING_FLASH_ENC=y
+
+CONFIG_PARTITION_TABLE_OFFSET=0xD000
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_secure.csv"

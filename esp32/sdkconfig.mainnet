@@ -1,0 +1,4 @@
+# Mainnet (настоящие монеты). Добавляется поверх sdkconfig.defaults:
+#   idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.mainnet" build
+# Без sdkconfig.secure seed в NVS не зашифрован — держи на устройстве мелкие суммы.
+CONFIG_MW_MAINNET=y

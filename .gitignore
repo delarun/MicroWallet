@@ -1,0 +1,29 @@
+build/
+
+# Ключ подписи Secure Boot: только локально и в офлайн-копиях, никогда в репозиторий
+*.pem
+
+# Конфигурация, которую ESP-IDF генерирует при сборке
+esp32/sdkconfig
+esp32/sdkconfig.old
+
+# Внешние исходники: скачивает get_deps.sh
+lib/
+
+# Собранные прошивки и приложения: публикуются в релизах GitHub
+esp32/dist/
+apps/dist/
+
+# Android: сборка, кэш Gradle, путь к SDK на этой машине
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/.kotlin/
+*.iml
+
+# Python, дампы памяти
+__pycache__/
+*.pyc
+core.*

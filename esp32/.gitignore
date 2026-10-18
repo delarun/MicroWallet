@@ -1,0 +1,5 @@
+build/
+sdkconfig
+sdkconfig.old
+# Ключ подписи Secure Boot никогда не должен попасть в репозиторий
+*.pem

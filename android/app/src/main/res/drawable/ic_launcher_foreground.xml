@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Логотип как в приложении для ПК: корпус с экраном и кнопкой -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- корпус -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M38,40h32a5,5 0,0 1,5 5v14a5,5 0,0 1,-5 5h-32a5,5 0,0 1,-5 -5v-14a5,5 0,0 1,5 -5z" />
+    <!-- экран -->
+    <path
+        android:fillColor="#7C6CFF"
+        android:pathData="M39.5,45.5h29v13h-29z" />
+    <!-- строка на экране -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M43,50.5h14v3h-14z" />
+    <!-- кнопка -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,68m-4,0a4,4 0,1 1,8 0a4,4 0,1 1,-8 0" />
+</vector>

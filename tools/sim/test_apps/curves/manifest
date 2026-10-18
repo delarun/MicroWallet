@@ -1,0 +1,7 @@
+id=curves
+name=Curves test
+version=0.1
+icon=1824428181422418
+path=44'/501'
+path=44'/354'
+sr25519=yes

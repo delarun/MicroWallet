@@ -1,0 +1,7 @@
+id=btc
+name=Bitcoin
+version=1.0
+#₿
+icon=287c263c26267c28
+path=84'/0'
+path=84'/1'

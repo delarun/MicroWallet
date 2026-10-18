@@ -1,0 +1,6 @@
+id=eth
+name=Ethereum
+version=1.0
+# ромб Ethereum
+icon=183c7e3c5a3c1800
+path=44'/60'

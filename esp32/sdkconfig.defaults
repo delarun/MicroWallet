@@ -1,0 +1,73 @@
+# MicroWallet на ESP32-S3 SuperMini — обычная сборка (без eFuse).
+# Пины — в main/Kconfig.projbuild (menuconfig → MicroWallet).
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+# Новая прошивка, которая не дошла до рабочего состояния, откатывается
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# USB Serial/JTAG — только для протокола кошелька; логи — на UART0
+# (GPIO43/44)
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=20480
+
+# Энергосбережение: автоматический лёгкий сон, BLE не рвётся (modem sleep от
+# основного кварца — внешнего 32 кГц на SuperMini нет)
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+CONFIG_BT_CTRL_MODEM_SLEEP=y
+CONFIG_BT_CTRL_MODEM_SLEEP_MODE_1=y
+CONFIG_BT_CTRL_LPCLK_SEL_MAIN_XTAL=y
+CONFIG_BT_CTRL_MAIN_XTAL_PU_DURING_LIGHT_SLEEP=y
+CONFIG_FREERTOS_HZ=1000
+
+# BLE: только периферия, одно соединение, большой MTU
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=n
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
+CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=247
+CONFIG_BT_NIMBLE_LOG_LEVEL_NONE=y
+# Шифрование — свой канал (src/channel.c), штатное BLE-сопряжение не нужно
+CONFIG_BT_NIMBLE_SECURITY_ENABLE=n
+CONFIG_BT_NIMBLE_NVS_PERSIST=n
+
+# Приложения WebAssembly: только интерпретатор (fast), без libc/WASI/потоков —
+# приложения обращаются к прошивке только через модуль "mw"
+CONFIG_WAMR_ENABLE_AOT=n
+CONFIG_WAMR_ENABLE_INTERP=y
+CONFIG_WAMR_INTERP_FAST=y
+CONFIG_WAMR_ENABLE_LIBC_BUILTIN=n
+CONFIG_WAMR_ENABLE_LIBC_WASI=n
+CONFIG_WAMR_ENABLE_LIB_PTHREAD=n
+
+# Просадка питания: порог — заводской 2.44 В. От аккумулятора плата питается через
+# диод и стабилизатор, и под нагрузкой BLE линия 3.3 В держится около 2.9–3.0 В: с
+# порогом 2.84 В плата сбрасывалась уже при старте (boot=brown@ble, brown@init).
+# От зависаний на почти пустом аккумуляторе — программные пороги в src/app.c.
+CONFIG_ESP_BROWNOUT_DET=y
+CONFIG_ESP_BROWNOUT_DET_LVL_SEL_7=y
+
+# Самый большой пик тока — запуск радио (калибровка PHY в ble_init): от аккумулятора
+# на нём ловили boot=brown@ble. Кошелёк лежит рядом с телефоном, +9 дБм не нужны:
+# 0 дБм, потолок PHY 10 дБм, а после просадки IDF сам ещё снижает мощность.
+CONFIG_BT_CTRL_DFT_TX_POWER_LEVEL_N0=y
+CONFIG_ESP_PHY_MAX_WIFI_TX_POWER=10
+CONFIG_ESP_PHY_REDUCE_TX_POWER=y
+
+# Встроенная PSRAM 2 МБ (ESP32-S3 SuperMini, quad): туда уходят крупные выделения —
+# код приложения и его 64 КБ памяти, — внутренняя RAM остаётся BLE и системе.
+# Нет PSRAM — прошивка всё равно загрузится (приложениям тогда может не хватить памяти).
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+CONFIG_SPIRAM_MEMTEST=n

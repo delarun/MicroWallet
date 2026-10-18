@@ -1,0 +1,147 @@
+package io.microwallet.app
+
+import io.microwallet.app.ble.BleDevice
+import io.microwallet.app.ble.ChannelError
+import io.microwallet.app.ble.MemoryBondStore
+import io.microwallet.app.core.DeviceError
+import io.microwallet.app.core.Http
+import io.microwallet.app.core.SendRequest
+import io.microwallet.app.core.Wallet
+import io.microwallet.app.core.info
+import io.microwallet.app.core.inspectApp
+import org.json.JSONObject
+import org.json.JSONTokener
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import java.io.File
+import java.math.BigDecimal
+
+/** Подменённая сеть: ответы из vectors.json (их записал gen_vectors.py). */
+class FakeHttp(private val responses: JSONObject) : Http {
+    private fun answer(key: String): Any {
+        if (!responses.has(key)) throw AssertionError("нет ответа для $key")
+        return JSONTokener(responses.get(key).toString()).nextValue()
+    }
+
+    override fun get(url: String) = answer("GET $url")
+    override fun post(url: String, body: JSONObject) = answer("POST $url ${body.optString("method")}".trimEnd())
+    override fun postRaw(url: String, raw: String) = responses.getString("RAW $url")
+    override fun download(url: String, onProgress: (Long, Long) -> Unit) = throw AssertionError("download $url")
+}
+
+class SimTest {
+    private lateinit var vectors: JSONObject
+
+    @Before
+    fun setUp() {
+        Sim.require()
+        vectors = JSONObject(javaClass.getResource("/vectors.json")!!.readText())
+    }
+
+    private fun screenCode(dir: File): String? =
+        Regex("""\[screen] Code: (\d{3} \d{3})""").findAll(File(dir, "stderr.txt").readText()).lastOrNull()?.groupValues?.get(1)
+
+    /** Тот же код прошивки по шифрованному каналу: сопряжение, восстановление, повторное подключение, подмена. */
+    @Test
+    fun channel() {
+        val dir = Sim.newDir()
+        val bonds = MemoryBondStore()
+        val codes = ArrayList<String>()
+
+        // 1. первое подключение: код в приложении совпадает с «экраном»
+        var dev = BleDevice("AA:BB", "sim", SimFrames(Sim.start("frames", dir)), bonds) { codes.add(it) }
+        assertTrue(dev.channel.pairedNow)
+        assertEquals(screenCode(dir), codes.single())
+        val w = Wallet(dev, FakeHttp(vectors.getJSONObject("responses")), Sim.words)
+        assertFalse(w.ready)
+
+        // 2. восстановление по BLE, установка приложений-монет по каналу, адреса — как у Python-хоста
+        assertTrue(w.restore("abandon ".repeat(11) + "about"))
+        assertTrue(Sim.apps.size >= 4)
+        for (f in Sim.apps) w.installApp(inspectApp(f.readBytes())) { _, _ -> }
+        assertEquals(listOf("btc", "prl", "tron", "bsc", "eth"), w.coins)
+        val addrs = vectors.getJSONObject("addresses")
+        for (c in listOf("btc", "prl", "tron", "bsc")) assertEquals(addrs.getString(c), w.address(c))
+
+        // 3. длинная команда через канал: подпись Pearl
+        val d = w.prepareSend(SendRequest("prl", w.address("prl", 7), "5.5", feerate = BigDecimal(2)))
+        assertEquals(312, d.sign().first.length / 2)
+        dev.close()
+
+        // 4. знакомый телефон — без кода
+        codes.clear()
+        dev = BleDevice("AA:BB", "sim", SimFrames(Sim.start("frames", dir)), bonds) { codes.add(it) }
+        assertFalse(dev.channel.pairedNow)
+        assertTrue(codes.isEmpty())
+        assertEquals("ready", dev.info()["state"])
+        dev.close()
+
+        // 5. отказ кнопкой — DeviceError("rejected")
+        dev = BleDevice("AA:BB", "sim", SimFrames(Sim.start("frames", dir, mapOf("MW_SIM_ANSWER" to "reject"))), bonds)
+        val e = assertThrows(DeviceError::class.java) { dev.call("app btc show 0") }
+        assertEquals("rejected", e.message)
+        dev.close()
+
+        // 6. устройство «забыло» телефон, а телефон помнит ключ — снова код
+        File(dir, "bonds.bin").delete()
+        codes.clear()
+        dev = BleDevice("AA:BB", "sim", SimFrames(Sim.start("frames", dir)), bonds) { codes.add(it) }
+        assertTrue(dev.channel.pairedNow)
+        assertEquals(screenCode(dir), codes.single())
+        dev.close()
+    }
+
+    @Test
+    fun tamperedFrameRejected() {
+        val dir = Sim.newDir()
+        val bonds = MemoryBondStore()
+        val frames = SimFrames(Sim.start("frames", dir))
+        val dev = BleDevice("AA:BB", "sim", frames, bonds)
+        val ch = dev.channel
+        val frame = ch.sealForTest(ch.txNext, "info")
+        frame[12] = (frame[12].toInt() xor 1).toByte()
+        frames.send(frame)
+        assertThrows(ChannelError::class.java) { ch.recvLineForTest(5000) }
+        dev.close()
+    }
+
+    /** Те же транзакции, что собрал и подписал host/wallet.py, — байт в байт. */
+    @Test
+    fun vectors() {
+        val dir = Sim.newDir()
+        val dev = LineDevice(Sim.start("lines", dir))
+        dev.call("restore " + "00".repeat(16))
+        Wallet(dev, FakeHttp(vectors.getJSONObject("responses")), Sim.words).let { setup ->
+            for (f in Sim.apps) setup.installApp(inspectApp(f.readBytes())) { _, _ -> }
+        }
+        val w = Wallet(dev, FakeHttp(vectors.getJSONObject("responses")), Sim.words)
+        val cases = vectors.getJSONArray("cases")
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val req = SendRequest(
+                coin = c.getString("coin"), dest = c.getString("dest"), amount = c.getString("amount"),
+                asset = c.optString("asset").ifEmpty { null },
+                feerate = c.optString("feerate").ifEmpty { null }?.let { BigDecimal(it) },
+                feeLimit = c.optString("feeLimit").ifEmpty { null },
+            )
+            val d = w.prepareSend(req)
+            val r = w.signAndSend(d, broadcast = false)
+            val what = "${req.coin} ${req.asset ?: ""}"
+            assertEquals("fee $what", c.getString("fee"), d.fee)
+            assertEquals("txid $what", c.getString("txid"), r.txid)
+            if (c.getBoolean("exact")) assertEquals("raw $what", c.getString("raw"), r.raw)
+            else assertEquals("размер $what", c.getString("raw").length, r.raw.length)
+            assertFalse(r.broadcast)
+            if (c.has("balance")) {
+                val b = w.balance("prl")
+                assertEquals(c.getString("balance"), b.assets[0].amount.toString())
+                assertEquals(c.getString("pending"), b.pending.toString())
+            }
+        }
+        dev.close()
+    }
+}
