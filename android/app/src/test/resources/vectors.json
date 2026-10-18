@@ -4,7 +4,8 @@
   "prl": "tprl1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqm5v93u",
   "tron": "TUEZSdKsoDHQMeZwihtdoBiN46zxhGWYdH",
   "bsc": "0x9858EfFD232B4033E47d90003D41EC34EcaEda94",
-  "ton": "0QDxNqXW0IXweuExwOiUuybRpkO2hzOift66DtiHIobBIn_X"
+  "ton": "0QDxNqXW0IXweuExwOiUuybRpkO2hzOift66DtiHIobBIn_X",
+  "ltc": "tltc1q6rz28mcfaxtmd6v789l9rrlrusdprr9pesrjxk"
  },
  "responses": {
   "TEXT https://mempool.space/testnet4/api/tx/fa6b66ae9631802906bd271b29a629a49a0a702eaa0e1c520d03f94cc98398ff/hex": "0200000001a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a10000000000ffffffff013075000000000000160014d0c4a3ef09e997b6e99e397e518fe3e41a118ca100000000",
@@ -359,6 +360,337 @@
     "tx_count": 0
    }
   },
+  "TEXT https://litecoinspace.org/testnet/api/tx/aaf966be7d1acf0f4f465cc064aaaa6191df330c81ad4615d8f1c18beeed25e9/hex": "0200000001c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c10000000000ffffffff014054890000000000160014d0c4a3ef09e997b6e99e397e518fe3e41a118ca100000000",
+  "GET https://litecoinspace.org/testnet/api/address/tltc1q6rz28mcfaxtmd6v789l9rrlrusdprr9pesrjxk": {
+   "chain_stats": {
+    "tx_count": 1
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1q6rz28mcfaxtmd6v789l9rrlrusdprr9pesrjxk/utxo": [
+   {
+    "txid": "aaf966be7d1acf0f4f465cc064aaaa6191df330c81ad4615d8f1c18beeed25e9",
+    "vout": 0,
+    "value": 9000000,
+    "status": {
+     "confirmed": true
+    }
+   }
+  ],
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qd7spv5q28348xl4myc8zmh983w5jx32ctl5d4h": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qxdyjf6h5d6qxap4n2dap97q4j5ps6ua8fha3gz": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qynpgs6wap6h9uvy7j0xlesew2w82qn0372e2xj": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1q677973lw0w796gttpy52f296jqaaksz0duklcr": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qr7scvm07ta0ldzlrmk7rnmc9lk356yarr2tz9a": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1q4e9q5taxnsvc6m0uxv6h75mkzvnkxeqkp77um2": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qfsryn6hh2yhpxpp7m9dh54x89wettyfkvusd2d": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qk9ca9jh7a2muk2venu26qsc2an5cvnwpqrz80q": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1ql483wsftk62xvt4k5w608h2w9yy2nrnmthqukv": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qz62u6t0px5tpyplrxuh2zyw6ycejyt9j502pjs": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qextge928njsn94qu5jhc80uyx3wpz0fjemm8ru": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qevqc0f9vv69y8l5328heyap7vh4sm3pf82wf8s": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qdl5kf4928qng9t28cntwslha9ppwxdccq535mp": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qqs2f8gy3d42pwj68yk7y42fa8cfr59upqtktlc": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qhtwqm3x7wn0zteznkkzpamzrm345js9k5d3cfy": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qfvczjgwnc6l4tr4ee8vlffr6hznf7u28lme557": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1q8sh5sqh7lml070lxt540408xuhklxkvyjmzm5z": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1q7lttzr63l6z89rys3c8zh9rt6aj78fel5fcm5g": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1q4kestxh2w7r7h5hxvn4pn2qv2dldvylgtjf5x2": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1q9u62588spffmq4dzjxsr5l297znf3z6jdfgyhw": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qkwgskuzmmwwvqajnyr7yp9hgvh5y45kg7xwnty": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1q2vma00td2g9llw8hwa8ny3r774rtt7ae2p32j4": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qdz50mh3c5n2nyhazlxcum3ckwd7vppfh2zuc3x": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qw3xfnyuspj8qnr2envc448mxwam7f7p2wycnh0": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1q053ptqlv0ugz8fcc3njw355rdluk4tqnwpdklm": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qsqtfalqsdcqc06s0naxrzzluh4utc0ldvff826": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qx82rjy3h09q55pvqwgea47f2cvvu8r66cpees4": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qaj6xxrj2n2ddqxe3a0wncxvc0jrwd3qrs8tpkx": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qpdez8vj0p2f3apazztc6k6g0w09slrxy45vnh7": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1q6mpyx6qvvpuhkg0u9fq7ddllh6zrsrpw72vywg": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qcgswlmkg9cdfnhzzzqq4xw6cagnye9u9q6sxdq": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qh7xjs0ehz2atv3cv0xkl2xmffe3uqt0a89kfe0": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qs22g0ryp2x50mf4l85cmn4fs5t7uta9c6hv97u": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qgyhvw0wh6xfttg2hpnpzde3xjsf7xgnfsv28tc": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qfs9g4l8sushltwr7t3dusucz4atydvkere368y": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qlvrvpxm6gfhrvdx026g8xljns4dvf2xqlqema0": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qduktcw86srx4mkhk25hsmqa3ewrnmtzwkzasvt": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1q0c5gp85e83tfv3rynwlx9uh3ah6qnzfynz3c7j": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
+  "GET https://litecoinspace.org/testnet/api/address/tltc1qyv52gp849hukss3atzrmgechz9c7wac63spzew": {
+   "chain_stats": {
+    "tx_count": 0
+   },
+   "mempool_stats": {
+    "tx_count": 0
+   }
+  },
   "POST https://ethereum-sepolia-rpc.publicnode.com eth_getTransactionCount": {
    "jsonrpc": "2.0",
    "id": 1,
@@ -671,6 +1003,16 @@
    "exact": true
   },
   {
+   "coin": "ltc",
+   "dest": "QSeL5hkhjGwN1a1ydJRrHbjD9gaLFGPBnK",
+   "amount": "0.05",
+   "feerate": "2",
+   "raw": "02000000000101e925edee8bc1f1d81546ad810c33df9161aaaa64c05c464f0fcf1a7dbe66f9aa0000000000fdffffff02404b4c000000000017a914424242424242424242424242424242424242424287e4073d00000000001600142f34aa1cf00a53b055a291a03a7d45f0a6988b5202473044022045f6cd3905cd2777f16f9cf3ba8e3493274e1513f146f21b406656373e030440022028d4444d85b34f4098352a69f163f793a206a4303184f6fe531f9b6ec1a544bf012102e7ab2537b5d49e970309aae06e9e49f36ce1c9febbd44ec8e0d1cca0b4f9c31900000000",
+   "txid": "08137c153d392253fed8fd6402dbf4e3ebd0a65fe92cbad14f5df7bdff34e08e",
+   "fee": "0.00000284",
+   "exact": true
+  },
+  {
    "coin": "eth",
    "asset": "eth",
    "dest": "0x3535353535353535353535353535353535353535",
@@ -685,7 +1027,7 @@
    "dest": "tprl1pyfv094rr0vk28lf8v9yx3veaacdzg26ztqk4ga84zucqqhafnn5qp0r9sv",
    "amount": "5.5",
    "feerate": "2",
-   "raw": "02000000000102b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b10000000000fdffffffb3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b30200000000fdffffff028055c820000000002251202258f2d4637b2ca3fd27614868b33dee1a242b42582d5474f51730005fa99ce8d81b2c0400000000225120d73acf6667b7850e6e00e21bb4525a2c5e2d88956a3d2c35b0bc06f4b0df01bc0140f05f17871b73c677c469b57d2773dcefe4798301ea5f3a2230df290656df1fd3bfc2c875b44c33cf7e7f9a9ea20e4beb5068574d8b87016148939fd9e5ddddaa0140ca24d114852de41303787f9e632b4b18053b73efd355ed087ca85420b85a4eee42b5cb22107c50e51535f04dfdc8d2752cecab1c1b9b56e5ba0c8b4bda3c776a00000000",
+   "raw": "02000000000102b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b10000000000fdffffffb3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b30200000000fdffffff028055c820000000002251202258f2d4637b2ca3fd27614868b33dee1a242b42582d5474f51730005fa99ce8d81b2c0400000000225120d73acf6667b7850e6e00e21bb4525a2c5e2d88956a3d2c35b0bc06f4b0df01bc0140adf4cdcb70bf960ec01ba3658ca44b6bd037e5a95cbf3d9f6cd8f407f5fa5ba6b6922046ecdc65239d3cbc34a14daa262ba528604d14f82490f567b70e37fbc6014074818b534e4f5cb8b30358956d073057f4cad0156b17d64d57569bd23168e0e6f9832359437786f35b2d7716ca0a76e29ae388b43df03df9302718e8c7330abf00000000",
    "txid": "d76f65d4bb263d9fc5780986f23be54c7855adadc78b9bc787bb60fab0224346",
    "fee": "0.00000424",
    "exact": false,

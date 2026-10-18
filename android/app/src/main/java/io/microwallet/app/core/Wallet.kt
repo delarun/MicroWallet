@@ -366,14 +366,14 @@ class Wallet(
     override fun address(coin: String, index: Int, chain: Int): String {
         need(coin)
         return addrCache.getOrPut("$coin/$chain/$index") {
-            dev.call(cmd(coin, if (coin == "btc" || coin == "prl") "addr $chain $index" else "addr $index"))
+            dev.call(cmd(coin, if (coin in UTXO) "addr $chain $index" else "addr $index"))
         }
     }
 
     /** Адрес, подтверждённый на устройстве. Отказ кнопкой — DeviceError("rejected"). */
     override fun showAddress(coin: String, index: Int): String {
         need(coin)
-        return dev.call(cmd(coin, if (coin == "btc" || coin == "prl") "show 0 $index" else "show $index"))
+        return dev.call(cmd(coin, if (coin in UTXO) "show 0 $index" else "show $index"))
     }
 
     override fun restore(phrase: String): Boolean {
@@ -473,7 +473,7 @@ class Wallet(
 
     override fun balance(coin: String, skip: Set<String>): Balance {
         need(coin)
-        if (coin == "btc" || coin == "prl") {
+        if (coin in UTXO) {
             val s = scan(coin)
             return Balance(
                 address = address(coin, 0),
@@ -512,7 +512,7 @@ class Wallet(
         need(req.coin)
         val asset = req.asset ?: coinInfo(req.coin).assetsFor(net)[0].first
         return when (req.coin) {
-            "btc", "prl" -> prepareUtxo(req.coin, req.dest, req.amount, req.feerate)
+            "btc", "prl", "ltc" -> prepareUtxo(req.coin, req.dest, req.amount, req.feerate)
             "tron" -> prepareTron(req.index, req.dest, req.amount, asset, req.feeLimit, req.memo)
             "ton" -> prepareTon(req.index, req.dest, req.amount, asset, req.memo)
             else -> prepareEvm(cfg.evm(req.coin, chainId), req.index, req.dest, req.amount, asset, req.gasPrice)
@@ -521,12 +521,16 @@ class Wallet(
 
     // ================= BTC и Pearl =================
 
-    private fun btcGet(path: String) = http.get(cfg.btcApi + path)
+    /** API как у mempool.space: Bitcoin — mempool.space, Litecoin — litecoinspace.org. */
+    private fun api(coin: String) = if (coin == "ltc") cfg.ltcApi else cfg.btcApi
+    private fun hrpOf(coin: String) = when (coin) { "ltc" -> cfg.ltcHrp; "prl" -> cfg.prlHrp; else -> cfg.hrp }
+    private fun b58Of(coin: String) = when (coin) { "ltc" -> cfg.ltcB58; "prl" -> null; else -> cfg.btcB58 }
+    private fun btcGet(path: String, coin: String = "btc") = http.get(api(coin) + path)
 
     /** Предыдущая транзакция целиком — с кэшем: она не меняется. */
     private val prevCache = HashMap<String, ByteArray>()
-    private fun prevTx(txid: String): ByteArray =
-        prevCache.getOrPut(txid) { http.getText(cfg.btcApi + "/tx/$txid/hex").unhex() }
+    private fun prevTx(txid: String, coin: String = "btc"): ByteArray =
+        prevCache.getOrPut("$coin:$txid") { http.getText(api(coin) + "/tx/$txid/hex").unhex() }
     private fun prlGet(path: String) = http.get(cfg.prlApi + "/api/v2" + path)
 
     class Scan(val utxos: List<Utxo>, val immature: List<Utxo>, val changeIndex: Int)
@@ -557,13 +561,13 @@ class Wallet(
                 val info = prlGet("/address/$addr?details=basic") as JSONObject
                 info.optInt("txs", 0) + info.optInt("unconfirmedTxs", 0) > 0
             } else {
-                val info = btcGet("/address/$addr") as JSONObject
+                val info = btcGet("/address/$addr", coin) as JSONObject
                 info.getJSONObject("chain_stats").getInt("tx_count") +
                     info.getJSONObject("mempool_stats").getInt("tx_count") > 0
             }
             if (chain == 1 && !used && firstUnusedChange == null) firstUnusedChange = i
             if (!used) continue
-            val list = (if (prl) prlGet("/utxo/$addr") else btcGet("/address/$addr/utxo")) as JSONArray
+            val list = (if (prl) prlGet("/utxo/$addr") else btcGet("/address/$addr/utxo", coin)) as JSONArray
             for (k in 0 until list.length()) {
                 val u = list.getJSONObject(k)
                 val conf = if (prl) u.optInt("confirmations", 0) else 0
@@ -592,7 +596,7 @@ class Wallet(
             return mapOf("fast" to est(2), "normal" to est(6), "slow" to est(24))
         }
         return try {
-            val r = btcGet("/v1/fees/recommended") as JSONObject
+            val r = btcGet("/v1/fees/recommended", coin) as JSONObject
             mapOf(
                 "fast" to BigDecimal(maxOf(1, r.optInt("fastestFee", 2))),
                 "normal" to BigDecimal(maxOf(1, r.optInt("halfHourFee", 2))),
@@ -605,11 +609,11 @@ class Wallet(
 
     private fun prepareUtxo(coin: String, destIn: String, amount: String, feerateIn: BigDecimal?): Draft {
         val prl = coin == "prl"
-        val hrp = if (prl) cfg.prlHrp else cfg.hrp
+        val hrp = hrpOf(coin)
         val dest = destIn.trim()
         val units = toUnits(amount, 8).toLong()
         val feerate = feerateIn ?: feeLevels(coin).getValue(if (prl) "fast" else "normal")
-        val destScript = addressToScript(dest, hrp, prl)
+        val destScript = addressToScript(dest, hrp, prl, b58Of(coin))
         val s = scan(coin)
         val utxos = s.utxos.sortedByDescending { it.value }
         val changeScript = addressToScript(address(coin, s.changeIndex, 1), hrp, prl)
@@ -637,7 +641,7 @@ class Wallet(
 
         val outs = arrayListOf(TxOut(units, destScript, false))
         val change = total - units - fee
-        if (change >= 546) outs.add(TxOut(change, changeScript, true, s.changeIndex))  // иначе "пыль" — в комиссию
+        if (change >= (if (coin == "ltc") 5460 else 546)) outs.add(TxOut(change, changeScript, true, s.changeIndex))  // иначе "пыль" — в комиссию
         else fee = total - units
         val tx = UtxoTx(
             ins = chosen.map { TxIn(it.txid, it.vout, it.value, it.chain, it.index, 0xFFFFFFFDL) },  // RBF
@@ -645,7 +649,7 @@ class Wallet(
         )
 
         // BTC: предыдущие транзакции входов — устройство само проверит по ним суммы
-        val prev = if (prl || legacy) emptyList() else chosen.map { prevTx(it.txid) }
+        val prev = if (prl || legacy) emptyList() else chosen.map { prevTx(it.txid, coin) }
         val sign = {
             val resp = if (legacy) dev.call(cmd(coin, "sign " + buildRequest(tx)))  // прошивки до v0.6
             else dev.appCall(cmd(coin, "sign"), signBlob(tx, prev))
@@ -661,7 +665,7 @@ class Wallet(
                 val r = JSONObject(http.postRaw(cfg.prlApi + "/api/v2/sendtx/", raw))
                 if (r.has("error")) throw WalletError("Сеть отклонила транзакцию: ${r.get("error")}")
             } else {
-                http.postRaw(cfg.btcApi + "/tx", raw)
+                http.postRaw(api(coin) + "/tx", raw)
             }
             Unit
         }
@@ -670,7 +674,7 @@ class Wallet(
             coin, coin, symbol(coin), address(coin, 0), dest, fmtUnits(units, 8), fmtUnits(fee, 8), symbol(coin),
             notes = listOf("Входов: ${chosen.size}, ставка ${feerate.toPlainString()} $unit"),
             sign = sign, broadcast = broadcast,
-            txUrl = if (prl) "${cfg.prlApi}/tx/" else cfg.btcTxUrl,
+            txUrl = if (prl) "${cfg.prlApi}/tx/" else if (coin == "ltc") cfg.ltcTxUrl else cfg.btcTxUrl,
         )
     }
 

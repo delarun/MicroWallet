@@ -394,6 +394,10 @@ fun CoinIcon(kind: String, size: Dp, modifier: Modifier = Modifier) {
                         drawPath(top, white)
                         drawPath(bottom, white.copy(alpha = 0.8f))
                     }
+                    "ltc" -> {
+                        val t = measurer.measure("Ł", TextStyle(fontSize = (22 * s).toSp(), fontWeight = FontWeight.Bold, color = white))
+                        drawText(t, topLeft = Offset(c.x - t.size.width / 2f, c.y - t.size.height / 2f))
+                    }
                     "ton" -> {  // перевёрнутый треугольник с чертой посередине
                         val st = Stroke(2.2f * s, cap = StrokeCap.Round, join = StrokeJoin.Round)
                         val p = Path().apply {

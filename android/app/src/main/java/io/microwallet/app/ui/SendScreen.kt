@@ -54,6 +54,7 @@ import io.microwallet.app.core.COINS
 import io.microwallet.app.core.Draft
 import io.microwallet.app.core.NetConfig
 import io.microwallet.app.core.Ton
+import io.microwallet.app.core.UTXO
 import io.microwallet.app.core.SendRequest
 import io.microwallet.app.core.SendResult
 import io.microwallet.app.core.WalletError
@@ -126,7 +127,8 @@ fun parsePaymentUri(s: String): Pair<String, String?> {
 
 fun validateDest(coin: String, cfg: NetConfig, text: String): String? = try {
     when (coin) {
-        "btc" -> addressToScript(text, cfg.hrp)
+        "btc" -> addressToScript(text, cfg.hrp, false, cfg.btcB58)
+        "ltc" -> addressToScript(text, cfg.ltcHrp, false, cfg.ltcB58)
         "prl" -> addressToScript(text, cfg.prlHrp, true)
         "tron" -> tronDecode(text)
         "ton" -> Ton.parseAddress(text, cfg.tonUsdt == null)
@@ -137,7 +139,7 @@ fun validateDest(coin: String, cfg: NetConfig, text: String): String? = try {
     e.message
 }
 
-private val HINTS = mapOf("btc" to "tb1… или bc1…", "prl" to "prl1p… (Taproot)", "tron" to "T…", "bsc" to "0x…", "eth" to "0x…", "ton" to "UQ… или EQ…")
+private val HINTS = mapOf("btc" to "bc1…, 1… или 3…", "ltc" to "ltc1…, L… или M…", "prl" to "prl1p… (Taproot)", "tron" to "T…", "bsc" to "0x…", "eth" to "0x…", "ton" to "UQ… или EQ…")
 
 @Composable
 fun SendScreen(vm: AppViewModel) {
@@ -185,7 +187,7 @@ private fun SendForm(vm: AppViewModel) {
     val w = vm.wallet ?: return
     val s = vm.send
     val clipboard = LocalClipboardManager.current
-    val utxo = s.coin == "btc" || s.coin == "prl"
+    val utxo = s.coin in UTXO
     val scan = rememberLauncherForActivityResult(ScanContract()) { r ->
         r.contents?.let {
             val (addr, amount) = parsePaymentUri(it)
@@ -195,7 +197,7 @@ private fun SendForm(vm: AppViewModel) {
     }
     LaunchedEffect(s.coin, w) {
         val c = s.coin
-        if ((c == "btc" || c == "prl") && w.ready && s.levels == null)
+        if (c in UTXO && w.ready && s.levels == null)
             vm.run({ w.feeLevels(c) }, { if (s.coin == c) s.levels = it }, {})
     }
 

@@ -57,8 +57,9 @@ CHAINS = {
     "bsc": {"name": "BNB Chain", "color": "#F3BA2F", "net": {"testnet": "testnet", "mainnet": "mainnet"}},
     "prl": {"name": "Pearl", "color": "#B9C7DA", "net": {"testnet": "testnet2", "mainnet": "mainnet"}},
     "ton": {"name": "TON", "color": "#0098EA", "net": {"testnet": "testnet", "mainnet": "mainnet"}},
+    "ltc": {"name": "Litecoin", "color": "#345D9D", "net": {"testnet": "testnet", "mainnet": "mainnet"}},
 }
-ORDER = ["btc", "prl", "tron", "bsc", "ton"]
+ORDER = ["btc", "prl", "ltc", "tron", "bsc", "ton"]
 MONO = "JetBrains Mono, Cascadia Mono, Consolas, Menlo, DejaVu Sans Mono, monospace"
 
 QSS = f"""
@@ -203,6 +204,13 @@ def coin_icon(kind, size=40):
             p.rotate(45)
             for dx, dy, w in ((0, 0, 6), (-7.5, -7.5, 4), (7.5, 7.5, 4), (-7.5, 7.5, 4), (7.5, -7.5, 4)):
                 p.drawRect(QRectF((dx - w / 2) * s, (dy - w / 2) * s, w * s, w * s))
+        elif kind == "ltc":  # Ł
+            f = QFont()
+            f.setPixelSize(int(22 * s))
+            f.setBold(True)
+            p.setFont(f)
+            p.setPen(white)
+            p.drawText(r, Qt.AlignCenter, "Ł")
         elif kind == "ton":  # перевёрнутый треугольник с чертой посередине
             path = QPainterPath()
             path.moveTo(11 * s, 13 * s)
@@ -440,15 +448,16 @@ class Task(QRunnable):
 
 class DemoWallet:
     """Тот же интерфейс, что у wallet.Wallet, но без устройства и сети."""
-    net, coins, ready, chain_id = "testnet", ["btc", "tron", "bsc", "prl", "ton"], True, 97
-    info = {"fw": "0.5", "net": "testnet", "state": "ready", "coins": "btc,tron,bsc,prl,ton", "bsc_chain": "97",
+    net, coins, ready, chain_id = "testnet", ["btc", "tron", "bsc", "prl", "ton", "ltc"], True, 97
+    info = {"fw": "0.5", "net": "testnet", "state": "ready", "coins": "btc,tron,bsc,prl,ton,ltc", "bsc_chain": "97",
             "hw": "esp32s3", "batt": "3920"}
     cfg = W.NETS["testnet"]
     ADDR = {"btc": "tb1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu",
             "tron": "TUEZSdKsoDHQMeZwihtdoBiN46zxhGWYdH",
             "bsc": "0x9858EfFD232B4033E47d90003D41EC34EcaEda94",
             "prl": "tprl1pr6yuq8u2r95wjzzgpdy8cpnncpl7l8zgy6x5q0367pnc53s2famqg7pt74",
-            "ton": "0QDxNqXW0IXweuExwOiUuybRpkO2hzOift66DtiHIobBIn_X"}
+            "ton": "0QDxNqXW0IXweuExwOiUuybRpkO2hzOift66DtiHIobBIn_X",
+            "ltc": "tltc1q6rz28mcfaxtmd6v789l9rrlrusdprr9pesrjxk"}
 
     def __init__(self, empty=False):
         self.dev = type("D", (), {"port": "demo"})()
@@ -482,7 +491,8 @@ class DemoWallet:
                       {"id": "trx", "symbol": "TRX", "decimals": 6, "amount": 120_500_000}],
              "bsc": [{"id": "usdt", "symbol": "USDT", "decimals": 18, "amount": 75 * 10**18},
                      {"id": "bnb", "symbol": "tBNB", "decimals": 18, "amount": 3 * 10**16}],
-             "ton": [{"id": "gram", "symbol": "tGRAM", "decimals": 9, "amount": 12_340_000_000}]}[coin]
+             "ton": [{"id": "gram", "symbol": "tGRAM", "decimals": 9, "amount": 12_340_000_000}],
+             "ltc": [{"id": "ltc", "symbol": "tLTC", "decimals": 8, "amount": 87_500_000}]}[coin]
         pend = 225_390_153_581 if coin == "prl" else 0
         return {"address": self.ADDR[coin], "assets": a, "pending": pend, "notes": []}
 
@@ -494,11 +504,13 @@ class DemoWallet:
     def prepare_send(self, coin, dest, amount, asset=None, index=0, feerate=None, fee_limit=None,
                      gas_price=None, memo=None):
         time.sleep(.8)
-        {"btc": lambda: W.address_to_script(dest, "tb"), "prl": lambda: W.address_to_script(dest, "tprl", True),
+        {"btc": lambda: W.address_to_script(dest, "tb", False, W.NETS["testnet"]["btc_b58"]),
+         "ltc": lambda: W.address_to_script(dest, "tltc", False, W.NETS["testnet"]["ltc_b58"]),
+         "prl": lambda: W.address_to_script(dest, "tprl", True),
          "tron": lambda: W.tron_decode(dest), "bsc": lambda: W.evm_decode(dest),
          "ton": lambda: W.T.parse_address(dest, True)}[coin]()
         asset = asset or W.COINS[coin]["assets"][0][0]
-        fee = {"btc": ("0.00000424", "tBTC"), "prl": ("0.00246824", "tPRL"),
+        fee = {"btc": ("0.00000424", "tBTC"), "prl": ("0.00246824", "tPRL"), "ltc": ("0.00000141", "tLTC"),
                "tron": (str(fee_limit or 40), "TRX"), "bsc": ("0.00000612", "tBNB"), "ton": ("≈0.0045", "tGRAM")}[coin]
         return W.Draft(coin, asset, self.symbol(asset), self.ADDR[coin], dest.strip(), amount,
                        fee[0], fee[1], fee_label="Макс. комиссия" if coin in ("tron", "bsc") else "Комиссия",
@@ -1001,13 +1013,13 @@ class SendPage(Page):
         self.asset.set_items(assets)
         self.asset.setVisible(len(assets) > 1)
         self.asset_label.setVisible(len(assets) > 1)
-        hints = {"btc": "tb1… или bc1…", "prl": "prl1p… (Taproot)", "tron": "T…", "bsc": "0x…", "ton": "UQ… или EQ…"}
+        hints = {"btc": "bc1…, 1… или 3…", "ltc": "ltc1…, L… или M…", "prl": "prl1p… (Taproot)", "tron": "T…", "bsc": "0x…", "ton": "UQ… или EQ…"}
         self.dest.setPlaceholderText(f"Адрес {CHAINS[coin]['name']}: {hints[coin]}")
         self.fee_levels = {}
         self.update_form()
         self.validate()
         w = self.app.wallet
-        if coin in ("btc", "prl") and w and w.ready:
+        if coin in W.UTXO and w and w.ready:
             self.app.run(w.fee_levels, coin, done=lambda lv, coin=coin: self._fees(coin, lv),
                          failed=lambda e: None)
 
@@ -1023,7 +1035,7 @@ class SendPage(Page):
         coin, asset = self.pills.current(), self.asset.current()
         sym = self.app.symbol(asset or coin)
         self.amount_sym.setText(sym)
-        utxo = coin in ("btc", "prl")
+        utxo = coin in W.UTXO
         self.fee_seg.setVisible(utxo)
         self.fee_limit.setVisible(coin == "tron" and asset == "usdt")
         self.memo_title.setVisible(coin in ("tron", "ton"))
@@ -1056,7 +1068,8 @@ class SendPage(Page):
             self.dest_hint.setText("")
         else:
             try:
-                {"btc": lambda: W.address_to_script(text, cfg["hrp"]),
+                {"btc": lambda: W.address_to_script(text, cfg["hrp"], False, cfg["btc_b58"]),
+                 "ltc": lambda: W.address_to_script(text, cfg["ltc_hrp"], False, cfg["ltc_b58"]),
                  "prl": lambda: W.address_to_script(text, cfg["prl_hrp"], True),
                  "tron": lambda: W.tron_decode(text), "bsc": lambda: W.evm_decode(text),
                  "ton": lambda: W.T.parse_address(text, self.app.wallet.net != "mainnet" if self.app.wallet else True)}[coin]()
@@ -1079,7 +1092,7 @@ class SendPage(Page):
         self.next_btn.setEnabled(False)
         self.next_btn.setText("Собираю транзакцию…")
         kw = {"asset": asset}
-        if coin in ("btc", "prl"):
+        if coin in W.UTXO:
             kw["feerate"] = self.fee_levels.get(self.fee_seg.current())
         if coin == "tron" and asset == "usdt":
             kw["fee_limit"] = self.fee_limit.text().strip() or None

@@ -127,6 +127,34 @@ def main():
         cases.append({"coin": "btc", "dest": dest, "amount": "0.001", "feerate": "3",
                       "raw": r["raw"], "txid": r["txid"], "fee": d1.fee, "exact": True})
 
+        # ---------- Litecoin: то же приложение utxo, API litecoinspace; перевод на старый адрес Q… (P2SH) ----------
+        lapi = cfg["ltc_api"]
+
+        def ltc_prev(tag, outs):
+            body = (struct.pack("<I", 2) + b"\x01" + bytes([tag]) * 32 + struct.pack("<I", 0) + b"\x00"
+                    + struct.pack("<I", 0xFFFFFFFF) + bytes([len(outs)])
+                    + b"".join(struct.pack("<QB", v, len(s)) + s for v, s in outs) + struct.pack("<I", 0))
+            txid = hashlib.sha256(hashlib.sha256(body).digest()).digest()[::-1].hex()
+            responses[f"TEXT {lapi}/tx/{txid}/hex"] = body.hex()
+            return txid
+        l00 = W.address_to_script(w.address("ltc", 0, 0), cfg["ltc_hrp"])
+        tl = ltc_prev(0xC1, [(9_000_000, l00)])
+        for chain in (0, 1):
+            for i in range(W.ADDRS_DEFAULT if chain == 0 else W.CHANGE_MAX):
+                a = w.address("ltc", i, chain)
+                used = (chain, i) == (0, 0)
+                responses[f"GET {lapi}/address/{a}"] = {
+                    "chain_stats": {"tx_count": 1 if used else 0}, "mempool_stats": {"tx_count": 0}}
+                if used:
+                    responses[f"GET {lapi}/address/{a}/utxo"] = [
+                        {"txid": tl, "vout": 0, "value": 9_000_000, "status": {"confirmed": True}}]
+        ldest = "QSeL5hkhjGwN1a1ydJRrHbjD9gaLFGPBnK"  # testnet P2SH (версия 0x3a)
+        W.address_to_script(ldest, cfg["ltc_hrp"], False, cfg["ltc_b58"])
+        d8 = w.prepare_send("ltc", ldest, "0.05", feerate=2)
+        r = w.sign_and_send(d8, broadcast=False)
+        cases.append({"coin": "ltc", "dest": ldest, "amount": "0.05", "feerate": "2",
+                      "raw": r["raw"], "txid": r["txid"], "fee": d8.fee, "exact": True})
+
         # ---------- Ethereum, EIP-1559 (тип 2) ----------
         # Python-хост ETH не отправляет — эталон собран вручную по EIP-1559, как его строит
         # Kotlin: maxFee = 2 × baseFee + чаевые; подписывает устройство (симулятор)
@@ -249,7 +277,7 @@ def main():
             cases.append({"coin": "bsc", "asset": asset, "dest": bdest, "amount": amt,
                           "raw": r["raw"], "txid": r["txid"], "fee": d5.fee, "exact": True})
 
-        addrs = {c: w.address(c, 0) for c in ("btc", "prl", "tron", "bsc", "ton")}
+        addrs = {c: w.address(c, 0) for c in ("btc", "prl", "tron", "bsc", "ton", "ltc")}
         dev.p.stdin.close()
 
     json.dump({"addresses": addrs, "responses": responses, "cases": cases}, sys.stdout, indent=1)

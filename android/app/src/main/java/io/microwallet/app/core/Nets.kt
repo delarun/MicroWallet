@@ -2,7 +2,9 @@
 package io.microwallet.app.core
 
 class NetConfig(
-    val btc: String, val btcApi: String, val btcTxUrl: String, val hrp: String,
+    val btc: String, val btcApi: String, val btcTxUrl: String, val hrp: String, val btcB58: B58Versions,
+    // Litecoin: API как у mempool.space (litecoinspace.org)
+    val ltc: String, val ltcApi: String, val ltcTxUrl: String, val ltcHrp: String, val ltcB58: B58Versions,
     val tronApi: String, val tronTxUrl: String, val tronUsdt: String,
     val bscRpc: String, val bscTxUrl: String, val bscUsdt: String, val bnb: String,
     val prlApi: String, val prlHrp: String, val prl: String,
@@ -33,6 +35,12 @@ val NETS = mapOf(
         btcApi = "https://mempool.space/testnet4/api",
         btcTxUrl = "https://mempool.space/testnet4/tx/",
         hrp = "tb",
+        btcB58 = B58Versions(listOf(0x6F), listOf(0xC4)),
+        ltc = "tLTC",
+        ltcApi = "https://litecoinspace.org/testnet/api",
+        ltcTxUrl = "https://litecoinspace.org/testnet/tx/",
+        ltcHrp = "tltc",
+        ltcB58 = B58Versions(listOf(0x6F), listOf(0x3A)),
         tronApi = "https://nile.trongrid.io",
         tronTxUrl = "https://nile.tronscan.org/#/transaction/",
         tronUsdt = "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf",
@@ -58,6 +66,12 @@ val NETS = mapOf(
         btcApi = "https://mempool.space/api",
         btcTxUrl = "https://mempool.space/tx/",
         hrp = "bc",
+        btcB58 = B58Versions(listOf(0x00), listOf(0x05)),
+        ltc = "LTC",
+        ltcApi = "https://litecoinspace.org/api",
+        ltcTxUrl = "https://litecoinspace.org/tx/",
+        ltcHrp = "ltc",
+        ltcB58 = B58Versions(listOf(0x30), listOf(0x32)),  // L… и M…; «3…» не берём — не отличить от адреса BTC
         tronApi = "https://api.trongrid.io",
         tronTxUrl = "https://tronscan.org/#/transaction/",
         tronUsdt = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
@@ -97,6 +111,7 @@ fun NetConfig.symbol(asset: String): String = ethTokens.firstOrNull { it.asset =
     "btc" -> btc
     "bnb" -> bnb
     "prl" -> prl
+    "ltc" -> ltc
     "gram" -> gram
     else -> if (asset.startsWith("trc10:")) "#" + asset.removePrefix("trc10:") else asset.uppercase()
 }
@@ -117,6 +132,7 @@ fun CoinInfo.assetsFor(net: String): List<Pair<String, Int>> = when {
 val COINS = listOf(
     CoinInfo("btc", "Bitcoin", listOf("btc" to 8), mapOf("testnet" to "testnet4", "mainnet" to "mainnet")),
     CoinInfo("prl", "Pearl", listOf("prl" to 8), mapOf("testnet" to "testnet2", "mainnet" to "mainnet")),
+    CoinInfo("ltc", "Litecoin", listOf("ltc" to 8), mapOf("testnet" to "testnet", "mainnet" to "mainnet")),
     CoinInfo("tron", "TRON", listOf("usdt" to 6, "trx" to 6), mapOf("testnet" to "Nile", "mainnet" to "mainnet")),
     CoinInfo("bsc", "BNB Chain", listOf("usdt" to 18, "bnb" to 18), mapOf("testnet" to "testnet", "mainnet" to "mainnet")),
     CoinInfo("eth", "Ethereum", listOf("eth" to 18), mapOf("testnet" to "Sepolia", "mainnet" to "mainnet")),
@@ -138,6 +154,9 @@ fun CoinInfo.tokensFor(net: String): List<String> = assetsFor(net).map { it.firs
 
 /** На главной по умолчанию («монета:токен»); новые токены — выключены, пока их не включат. */
 val DEFAULT_SHOWN_TOKENS = setOf("tron:usdt", "bsc:usdt", "eth:usdt", "eth:usdc", "ton:usdt")
+
+/** Монеты с адресами chain/index и подписью входов (BIP84/BIP86). */
+val UTXO = setOf("btc", "prl", "ltc")
 
 const val CHANGE_MAX = 20    // адреса сдачи идут подряд: проверяем до первого пустого, не дальше
 const val SCAN_TTL_MS = 30_000L  // баланс BTC/PRL не чаще раза в 30 с (mempool.space отвечает 429)

@@ -42,6 +42,7 @@ val COIN_COLORS = mapOf(
     "usdc" to Color(0xFF2775CA),
     "eth" to Color(0xFF627EEA),
     "ton" to Color(0xFF0098EA),
+    "ltc" to Color(0xFF345D9D),
     "dai" to Color(0xFFF5AC37),
     "usde" to Color(0xFF3A3A44),
     "pyusd" to Color(0xFF0070E0),

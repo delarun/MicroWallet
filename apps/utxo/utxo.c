@@ -1,5 +1,6 @@
-// utxo.c — общий код приложений Bitcoin (BIP84, P2WPKH) и Pearl (BIP86, Taproot).
-// Подключается из apps/btc/btc.c (UTXO_PRL 0) и apps/prl/prl.c (UTXO_PRL 1).
+// utxo.c — общий код приложений Bitcoin и Litecoin (BIP84, P2WPKH) и Pearl (BIP86, Taproot).
+// Подключается из apps/btc/btc.c (UTXO_PRL 0), apps/ltc/ltc.c (UTXO_PRL 0, UTXO_LTC 1) и
+// apps/prl/prl.c (UTXO_PRL 1). Litecoin — тот же SegWit v0 и BIP143, что у Bitcoin.
 // Перенесено из встроенных монет прошивки (src/tx.c, src/app.c до v0.5) без изменений
 // поведения: те же адреса, тот же формат запроса и ответа, те же экраны.
 //
@@ -7,6 +8,7 @@
 //   addr [chain] <i>     адрес (chain 0 — приём, 1 — сдача)
 //   show [chain] <i>     то же, со сверкой на экране
 //   xpub                 (только Bitcoin) zpub / vpub аккаунта
+// Выводы: свои SegWit-адреса сети и (кроме Pearl) старые P2PKH и P2SH — 1…/3…, L…/M….
 //   sign @               запрос блоком (app put, формат ниже) -> ok <подписи по входам>
 //   sign <hex>           то же строкой — только Pearl (BTC нужны предыдущие транзакции)
 //     BTC: "<DER+01>:<pubkey>" на вход (P2WPKH-свидетель), Pearl: BIP340-подпись на вход
@@ -24,6 +26,10 @@
 // подпись и так покрывает суммы и скрипты всех входов.
 #include "mw.h"
 
+#ifndef UTXO_LTC
+#define UTXO_LTC 0
+#endif
+
 #define MAX_IN 64
 #define MAX_OUT 16
 #define MAX_SCRIPT 42
@@ -34,6 +40,11 @@
 #define MAX_MONEY 2100000000000000000ULL  // 21e9 PRL в grain
 #define HIGH_FEE 10000000ULL              // 0.1 PRL
 #define PURPOSE 86
+#elif UTXO_LTC
+#define NAME "Litecoin"
+#define MAX_MONEY 8400000000000000ULL  // 84e6 LTC в литоши
+#define HIGH_FEE 1000000ULL            // 0.01 LTC
+#define PURPOSE 84
 #else
 #define NAME "Bitcoin"
 #define MAX_MONEY 2100000000000000ULL  // 21e6 BTC в сатоши
@@ -41,9 +52,16 @@
 #define PURPOSE 84
 #endif
 
-static uint32_t coin_type(void) { return UTXO_PRL ? (mw_net() ? 808276 : 1) : (mw_net() ? 0 : 1); }
-static const char *hrp(void) { return UTXO_PRL ? (mw_net() ? "prl" : "tprl") : (mw_net() ? "bc" : "tb"); }
-static const char *unit(void) { return UTXO_PRL ? (mw_net() ? "PRL" : "tPRL") : (mw_net() ? "BTC" : "tBTC"); }
+// SLIP-44: Bitcoin 0, Litecoin 2, Pearl 808276; testnet у всех 1
+static uint32_t coin_type(void) {
+  return !mw_net() ? 1 : UTXO_PRL ? 808276 : UTXO_LTC ? 2 : 0;
+}
+static const char *hrp(void) {
+  return UTXO_PRL ? (mw_net() ? "prl" : "tprl") : UTXO_LTC ? (mw_net() ? "ltc" : "tltc") : (mw_net() ? "bc" : "tb");
+}
+static const char *unit(void) {
+  return UTXO_PRL ? (mw_net() ? "PRL" : "tPRL") : UTXO_LTC ? (mw_net() ? "LTC" : "tLTC") : (mw_net() ? "BTC" : "tBTC");
+}
 
 static void path_of(uint32_t chain, uint32_t idx, uint32_t p[5]) {
   p[0] = H(PURPOSE);
@@ -83,6 +101,19 @@ static int script_addr(const uint8_t *s, size_t n, char *out, size_t outlen) {
   if (n == 22 && s[0] == 0x00 && s[1] == 20) return mw_segwit_addr(out, outlen, hrp(), 0, s + 2, 20);  // P2WPKH
   if (n == 34 && s[0] == 0x00 && s[1] == 32) return mw_segwit_addr(out, outlen, hrp(), 0, s + 2, 32);  // P2WSH
   if (n == 34 && s[0] == 0x51 && s[1] == 32) return mw_segwit_addr(out, outlen, hrp(), 1, s + 2, 32);  // P2TR
+  // Старые адреса (base58): P2PKH 76a914<20>88ac, P2SH a914<20>87. Версии: Bitcoin 00/05
+  // (testnet 6f/c4), Litecoin 30/32 — L…/M… (testnet 6f/3a)
+  uint8_t v[21];
+  if (n == 25 && s[0] == 0x76 && s[1] == 0xa9 && s[2] == 20 && s[23] == 0x88 && s[24] == 0xac) {
+    v[0] = mw_net() ? (UTXO_LTC ? 0x30 : 0x00) : 0x6f;
+    memcpy(v + 1, s + 3, 20);
+    return mw_base58check(v, 21, out, outlen);
+  }
+  if (n == 23 && s[0] == 0xa9 && s[1] == 20 && s[22] == 0x87) {
+    v[0] = mw_net() ? (UTXO_LTC ? 0x32 : 0x05) : (UTXO_LTC ? 0x3a : 0xc4);
+    memcpy(v + 1, s + 2, 20);
+    return mw_base58check(v, 21, out, outlen);
+  }
   return 0;
 #endif
 }
@@ -376,7 +407,7 @@ static int review(const tx_t *tx) {
   mw_fmt_u64(tx->fee, 8, num, sizeof num);
   mw_cat(fee, sizeof fee, num, " ", unit());
   mw_amount("Fee", fee);
-  return mw_confirm(UTXO_PRL ? "Pearl transfer" : "Bitcoin transfer");
+  return mw_confirm(NAME " transfer");
 }
 
 // ---------- предыдущие транзакции (BTC) ----------
@@ -643,7 +674,7 @@ void mw_main(const char *cmd, size_t len) {
     cmd_sign(hx, hl);
     return;
   }
-#if !UTXO_PRL
+#if !UTXO_PRL && !UTXO_LTC
   if (wl == 4 && !memcmp(w, "xpub", 4)) {
     uint32_t path[3] = {H(84), H(coin_type()), H(0)};
     char x[120];

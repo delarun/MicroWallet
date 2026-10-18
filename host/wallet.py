@@ -18,6 +18,7 @@ MicroWallet: библиотека для общения с устройство�
   python wallet.py btc  send ADDR SATS [--feerate SAT_PER_VB] [--dry-run]
 
   python wallet.py prl compat             # покажет ли Pearl Wallet с этой фразой те же адреса
+  python wallet.py ltc receive | balance | send ADDR AMOUNT [--feerate N] [--dry-run]   # Litecoin
   python wallet.py ton send ADDR AMOUNT [--token gram|usdt] [--memo TEXT] [--dry-run]
   python wallet.py tron receive [-i N] | balance [-i N]
   python wallet.py tron send ADDR AMOUNT [--token usdt|trx|trc10:ID] [--fee-limit TRX] [--memo TEXT] [--dry-run]
@@ -71,6 +72,12 @@ NETS = {
         "btc_api": "https://mempool.space/testnet4/api",
         "btc_tx_url": "https://mempool.space/testnet4/tx/",
         "hrp": "tb",
+        "btc_b58": {"pkh": (0x6F,), "sh": (0xC4,)},
+        "ltc": "tLTC",
+        "ltc_api": "https://litecoinspace.org/testnet/api",
+        "ltc_tx_url": "https://litecoinspace.org/testnet/tx/",
+        "ltc_hrp": "tltc",
+        "ltc_b58": {"pkh": (0x6F,), "sh": (0x3A,)},
         "tron_api": "https://nile.trongrid.io",
         "tron_tx_url": "https://nile.tronscan.org/#/transaction/",
         "tron_usdt": "TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf",
@@ -91,6 +98,12 @@ NETS = {
         "btc_api": "https://mempool.space/api",
         "btc_tx_url": "https://mempool.space/tx/",
         "hrp": "bc",
+        "btc_b58": {"pkh": (0x00,), "sh": (0x05,)},
+        "ltc": "LTC",
+        "ltc_api": "https://litecoinspace.org/api",
+        "ltc_tx_url": "https://litecoinspace.org/tx/",
+        "ltc_hrp": "ltc",
+        "ltc_b58": {"pkh": (0x30,), "sh": (0x32,)},  # L… и M…; «3…» не берём — не отличить от адреса BTC
         "tron_api": "https://api.trongrid.io",
         "tron_tx_url": "https://tronscan.org/#/transaction/",
         "tron_usdt": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
@@ -113,6 +126,7 @@ COINS = {
     "tron": {"name": "TRON", "assets": [("usdt", 6), ("trx", 6)]},
     "bsc": {"name": "BNB Chain", "assets": [("usdt", 18), ("bnb", 18)]},
     "prl": {"name": "Pearl", "assets": [("prl", 8)]},
+    "ltc": {"name": "Litecoin", "assets": [("ltc", 8)]},
     "ton": {"name": "TON", "assets": [("gram", 9), ("usdt", 6)]},  # GRAM — бывший Toncoin
 }
 
@@ -125,6 +139,7 @@ def ton_valid_until():
 def assets_for(coin, net):
     """Активы монеты в сети: у TON в testnet нет USDT."""
     return [a for a in COINS[coin]["assets"] if not (coin == "ton" and a[0] == "usdt" and not NETS[net]["ton_usdt"])]
+UTXO = ("btc", "prl", "ltc")  # монеты с адресами chain/index и подписью входов
 ADDRS_DEFAULT = 20  # адресов для получения, если прошивка не сообщает addrs= (до 0.6)
 CHANGE_MAX = 20     # адреса сдачи идут подряд: проверяем до первого пустого, не дальше
 TX_MAX_IN = 64  # лимит приложений btc/prl (запрос уходит блоком)
@@ -403,7 +418,32 @@ def _convertbits(data, frombits, tobits, pad):
     return out
 
 
-def address_to_script(addr, hrp, pearl=False):
+def b58check_decode(addr):
+    n = 0
+    for c in addr:
+        if c not in B58:
+            raise WalletError("неверный адрес")
+        n = n * 58 + B58.index(c)
+    raw = b"\0" * (len(addr) - len(addr.lstrip("1"))) + (n.to_bytes((n.bit_length() + 7) // 8, "big") if n else b"")
+    body, chk = raw[:-4], raw[-4:]
+    if len(raw) < 5 or hashlib.sha256(hashlib.sha256(body).digest()).digest()[:4] != chk:
+        raise WalletError("неверная контрольная сумма адреса")
+    return body
+
+
+def address_to_script(addr, hrp, pearl=False, b58=None):
+    """Адрес -> scriptPubKey. b58 — версии старых адресов сети {"pkh": (…), "sh": (…)}:
+    P2PKH 76a914<20>88ac и P2SH a914<20>87 (у Pearl их нет)."""
+    if b58 and not addr.lower().startswith(hrp + "1"):
+        pre = addr.lower()[:addr.rfind("1")] if addr.rfind("1") > 0 else ""
+        if pre.isalpha() and pre in ("bc", "tb", "ltc", "tltc", "prl", "tprl"):
+            raise WalletError(f"адрес другой сети ({pre}1…): ожидается {hrp}1… или старый адрес этой сети")
+        body = b58check_decode(addr)
+        if len(body) == 21 and body[0] in b58["pkh"]:
+            return b"\x76\xa9\x14" + body[1:] + b"\x88\xac"
+        if len(body) == 21 and body[0] in b58["sh"]:
+            return b"\xa9\x14" + body[1:] + b"\x87"
+        raise WalletError(f"адрес другой сети: ожидается {hrp}1… или старый адрес этой сети")
     a = addr.lower()
     if addr != a and addr != addr.upper():
         raise WalletError("смешанный регистр в адресе")
@@ -712,12 +752,12 @@ class Wallet:
 
     def address(self, coin, index=0, chain=0):
         self.need(coin)
-        return self.dev.call(self.cmd(coin, f"addr {chain} {index}" if coin in ("btc", "prl") else f"addr {index}"))
+        return self.dev.call(self.cmd(coin, f"addr {chain} {index}" if coin in UTXO else f"addr {index}"))
 
     def show_address(self, coin, index=0):
         """Адрес, подтверждённый на устройстве. Отказ кнопкой — DeviceError("rejected")."""
         self.need(coin)
-        return self.dev.call(self.cmd(coin, f"show 0 {index}" if coin in ("btc", "prl") else f"show {index}"))
+        return self.dev.call(self.cmd(coin, f"show 0 {index}" if coin in UTXO else f"show {index}"))
 
     def symbol(self, asset):
         return asset_symbol(self.cfg, asset)
@@ -820,7 +860,7 @@ class Wallet:
     def balance(self, coin, index=0):
         """{"address", "assets": [{"id","symbol","amount","decimals"}], "pending", "utxos", "notes"}"""
         self.need(coin)
-        if coin in ("btc", "prl"):
+        if coin in UTXO:
             utxos, immature, _ = self._scan(coin)
             sym = self.symbol(coin)
             return {"address": self.address(coin, 0), "notes": [],
@@ -851,7 +891,7 @@ class Wallet:
         """Собирает транзакцию (без подписи). amount — строка в целых монетах."""
         self.need(coin)
         asset = asset or COINS[coin]["assets"][0][0]
-        if coin in ("btc", "prl"):
+        if coin in UTXO:
             return self._prepare_utxo(coin, dest, amount, feerate)
         if coin == "tron":
             return self._prepare_tron(index, dest, amount, asset, fee_limit, memo)
@@ -948,15 +988,22 @@ class Wallet:
         raw = p.finalize_p2wpkh() if finalize else None
         return p.to_base64(), raw
 
-    def _prev_tx(self, txid):
+    def _api(self, coin):
+        """API как у mempool.space: Bitcoin — mempool.space, Litecoin — litecoinspace.org."""
+        return self.cfg["ltc_api" if coin == "ltc" else "btc_api"]
+
+    def _hrp(self, coin):
+        return self.cfg[{"btc": "hrp", "ltc": "ltc_hrp", "prl": "prl_hrp"}[coin]]
+
+    def _prev_tx(self, txid, coin="btc"):
         """Предыдущая транзакция целиком (сырые байты) — с кэшем: она не меняется."""
         cache = self.__dict__.setdefault("_prev_cache", {})
-        if txid not in cache:
-            cache[txid] = bytes.fromhex(http_text(self.cfg["btc_api"] + f"/tx/{txid}/hex"))
-        return cache[txid]
+        if (coin, txid) not in cache:
+            cache[(coin, txid)] = bytes.fromhex(http_text(self._api(coin) + f"/tx/{txid}/hex"))
+        return cache[(coin, txid)]
 
-    def _btc_get(self, path):
-        return http_json(self.cfg["btc_api"] + path)
+    def _btc_get(self, path, coin="btc"):
+        return http_json(self._api(coin) + path)
 
     def _prl_get(self, path):
         return http_json(self.cfg["prl_api"] + "/api/v2" + path)
@@ -982,13 +1029,13 @@ class Wallet:
                     info = self._prl_get(f"/address/{addr}?details=basic")
                     used = info.get("txs", 0) + info.get("unconfirmedTxs", 0) > 0
                 else:
-                    info = self._btc_get(f"/address/{addr}")
+                    info = self._btc_get(f"/address/{addr}", coin)
                     used = info["chain_stats"]["tx_count"] + info["mempool_stats"]["tx_count"] > 0
                 if chain == 1 and not used and first_unused_change is None:
                     first_unused_change = i
                 if not used:
                     continue
-                for u in (self._prl_get(f"/utxo/{addr}") if prl else self._btc_get(f"/address/{addr}/utxo")):
+                for u in (self._prl_get(f"/utxo/{addr}") if prl else self._btc_get(f"/address/{addr}/utxo", coin)):
                     if prl:
                         conf = u.get("confirmations", 0)
                         u.update(value=int(u["value"]), confirmed=conf > 0)
@@ -1011,7 +1058,7 @@ class Wallet:
                 return max(Decimal(1), (v * 10**8 / 1000).quantize(Decimal("0.1")))
             return {"fast": est(2), "normal": est(6), "slow": est(24)}
         try:
-            r = self._btc_get("/v1/fees/recommended")
+            r = self._btc_get("/v1/fees/recommended", coin)
             return {k: Decimal(max(1, r.get(f, 2))) for k, f in
                     (("fast", "fastestFee"), ("normal", "halfHourFee"), ("slow", "hourFee"))}
         except WalletError:
@@ -1022,10 +1069,11 @@ class Wallet:
 
     def _prepare_utxo(self, coin, dest, amount, feerate):
         prl = coin == "prl"
-        cfg, hrp = self.cfg, self.cfg["prl_hrp"] if prl else self.cfg["hrp"]
+        cfg, hrp = self.cfg, self._hrp(coin)
+        b58 = None if prl else cfg[f"{coin}_b58"]
         units = to_units(amount, 8)
         feerate = Decimal(str(feerate)) if feerate is not None else self.default_feerate(coin)
-        dest_script = address_to_script(dest.strip(), hrp, prl)
+        dest_script = address_to_script(dest.strip(), hrp, prl, b58)
         utxos, _, change_idx = self._scan(coin)
         utxos.sort(key=lambda u: -u["value"])
         change_script = address_to_script(self.address(coin, change_idx, 1), hrp, prl)
@@ -1047,7 +1095,7 @@ class Wallet:
 
         outs = [{"value": units, "script": dest_script, "change": False}]
         change = total - units - fee
-        if change >= 546:  # иначе это "пыль", пусть уйдёт в комиссию
+        if change >= (5460 if coin == "ltc" else 546):  # иначе это "пыль", пусть уйдёт в комиссию
             outs.append({"value": change, "script": change_script,
                          "change": True, "change_index": change_idx})
         else:
@@ -1061,7 +1109,7 @@ class Wallet:
         }
 
         # BTC: предыдущие транзакции входов — устройство само проверит по ним суммы
-        prev = [] if prl or self.legacy else [self._prev_tx(u["txid"]) for u in chosen]
+        prev = [] if prl or self.legacy else [self._prev_tx(u["txid"], coin) for u in chosen]
 
         def sign():
             if self.legacy:  # прошивки до v0.6: запрос строкой
@@ -1082,14 +1130,14 @@ class Wallet:
                 if "error" in r:
                     raise WalletError(f"Сеть отклонила транзакцию: {r['error']}")
             else:
-                post_raw(cfg["btc_api"] + "/tx", raw)
+                post_raw(self._api(coin) + "/tx", raw)
 
         unit = "grain/vB" if prl else "sat/vB"
         return Draft(coin, coin, self.symbol(coin), self.address(coin, 0), dest.strip(),
                      fmt_units(units, 8), fmt_units(fee, 8), self.symbol(coin),
                      notes=[f"Входов: {len(chosen)}, ставка {feerate} {unit}"],
                      sign=sign, broadcast=broadcast,
-                     tx_url=f"{cfg['prl_api']}/tx/" if prl else cfg["btc_tx_url"])
+                     tx_url=f"{cfg['prl_api']}/tx/" if prl else cfg[f"{coin}_tx_url"])
 
     # ================= TRON =================
 
@@ -1398,7 +1446,7 @@ def print_balance(w, coin, b):
     print(b["address"])
     for note in b["notes"]:
         print("  " + note)
-    if coin in ("btc", "prl"):
+    if coin in UTXO:
         show = lambda v: f"{fmt_units(v, 8)} {w.symbol(coin)}"
         for u in b["utxos"]:
             print(f'{show(u["value"]):>22}  {u["address"]}  [{"ok" if u["confirmed"] else "mempool"}]')
@@ -1492,6 +1540,9 @@ def main():
         ap.add_argument("--token", choices=["gram", "usdt"], default="gram")
         ap.add_argument("--memo", help="комментарий к переводу (виден в блокчейне всем)")
     coin("ton", ["receive", "balance", "send"], "сумма, например 1.5", ton_opts)
+
+    coin("ltc", ["receive", "balance", "send"], "сумма в LTC, например 0.5",
+         lambda ap: ap.add_argument("--feerate", type=Decimal, help="lit/vB (по умолчанию оценка сети)"))
 
     coin("prl", ["receive", "balance", "send", "compat"], "сумма в PRL, например 12.5",
          lambda ap: ap.add_argument("--feerate", type=Decimal,

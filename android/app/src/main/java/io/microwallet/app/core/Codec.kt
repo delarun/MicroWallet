@@ -131,7 +131,40 @@ private fun convertBits(data: List<Int>, from: Int, to: Int, pad: Boolean): List
 }
 
 /** bech32-адрес -> scriptPubKey. pearl = только Taproot (v1) и P2MR (v2). */
-fun addressToScript(addr: String, hrp: String, pearl: Boolean = false): ByteArray {
+/** Версии старых адресов сети (base58): P2PKH и P2SH. */
+class B58Versions(val pkh: List<Int>, val sh: List<Int>)
+
+fun b58checkDecode(addr: String): ByteArray {
+    var n = BigInteger.ZERO
+    for (c in addr) {
+        val i = B58.indexOf(c)
+        if (i < 0) throw WalletError("неверный адрес")
+        n = n.multiply(BigInteger.valueOf(58)).add(BigInteger.valueOf(i.toLong()))
+    }
+    val zeros = addr.length - addr.trimStart('1').length
+    val raw = ByteArray(zeros) + (if (n.signum() == 0) ByteArray(0) else n.unsignedBytes())
+    if (raw.size < 5) throw WalletError("неверный адрес")
+    val body = raw.copyOfRange(0, raw.size - 4)
+    if (!dsha(body).copyOfRange(0, 4).contentEquals(raw.copyOfRange(raw.size - 4, raw.size)))
+        throw WalletError("неверная контрольная сумма адреса")
+    return body
+}
+
+/** Адрес -> scriptPubKey. b58 — старые адреса сети: P2PKH 76a914<20>88ac и P2SH a914<20>87. */
+fun addressToScript(addr: String, hrp: String, pearl: Boolean = false, b58: B58Versions? = null): ByteArray {
+    if (b58 != null && !addr.lowercase().startsWith(hrp + "1")) {
+        val pos = addr.lastIndexOf('1')
+        val pre = if (pos > 0) addr.lowercase().substring(0, pos) else ""
+        if (pre in setOf("bc", "tb", "ltc", "tltc", "prl", "tprl"))
+            throw WalletError("адрес другой сети (${pre}1…): ожидается ${hrp}1… или старый адрес этой сети")
+        val body = b58checkDecode(addr)
+        val v = body[0].toInt() and 0xFF
+        if (body.size == 21 && v in b58.pkh)
+            return byteArrayOf(0x76, 0xa9.toByte(), 0x14) + body.copyOfRange(1, 21) + byteArrayOf(0x88.toByte(), 0xac.toByte())
+        if (body.size == 21 && v in b58.sh)
+            return byteArrayOf(0xa9.toByte(), 0x14) + body.copyOfRange(1, 21) + byteArrayOf(0x87.toByte())
+        throw WalletError("адрес другой сети: ожидается ${hrp}1… или старый адрес этой сети")
+    }
     val a = addr.lowercase()
     if (addr != a && addr != addr.uppercase()) throw WalletError("смешанный регистр в адресе")
     val pos = a.lastIndexOf('1')

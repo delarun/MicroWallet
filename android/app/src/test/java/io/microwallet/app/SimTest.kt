@@ -70,9 +70,9 @@ class SimTest {
         assertTrue(w.restore("abandon ".repeat(11) + "about"))
         assertTrue(Sim.apps.size >= 4)
         for (f in Sim.apps) w.installApp(inspectApp(f.readBytes())) { _, _ -> }
-        assertEquals(listOf("btc", "prl", "tron", "bsc", "eth", "ton"), w.coins)
+        assertEquals(listOf("btc", "prl", "ltc", "tron", "bsc", "eth", "ton"), w.coins)
         val addrs = vectors.getJSONObject("addresses")
-        for (c in listOf("btc", "prl", "tron", "bsc", "ton")) assertEquals(addrs.getString(c), w.address(c))
+        for (c in listOf("btc", "prl", "tron", "bsc", "ton", "ltc")) assertEquals(addrs.getString(c), w.address(c))
 
         // 3. длинная команда через канал: подпись Pearl
         val d = w.prepareSend(SendRequest("prl", w.address("prl", 7), "5.5", feerate = BigDecimal(2)))
