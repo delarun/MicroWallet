@@ -106,6 +106,23 @@ const char *hal_fw_build(void) {
 
 bool hal_usb_connected(void) { return usb_serial_jtag_is_connected(); }
 bool hal_secure(void) { return esp_secure_boot_enabled() && esp_flash_encryption_enabled(); }
+
+const char *hal_ota_info(void) {
+  static char r[32];
+  const esp_partition_t *run = esp_ota_get_running_partition(), *other = esp_ota_get_next_update_partition(NULL);
+  esp_ota_img_states_t st;
+  const char *s = "empty";
+  if (other && esp_ota_get_state_partition(other, &st) == ESP_OK) {
+    s = st == ESP_OTA_IMG_NEW              ? "new"
+        : st == ESP_OTA_IMG_PENDING_VERIFY ? "pending"
+        : st == ESP_OTA_IMG_VALID          ? "valid"
+        : st == ESP_OTA_IMG_INVALID        ? "invalid"
+        : st == ESP_OTA_IMG_ABORTED        ? "aborted"
+                                           : "undefined";
+  }
+  snprintf(r, sizeof r, "%s/%s", run ? run->label : "?", s);
+  return r;
+}
 bool hal_ble_available(void) { return true; }
 bool hal_ble_enabled(void) { return ble_enabled(); }
 bool hal_ble_connected(void) { return ble_connected(); }

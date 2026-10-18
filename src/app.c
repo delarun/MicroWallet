@@ -336,10 +336,10 @@ static void handle(char *line) {
     char coins[64] = "";  // монеты — это установленные приложения
     for (int i = 0, o = 0; i < apps_count() && o < (int)sizeof coins - 10; i++)
       o += snprintf(coins + o, sizeof coins - o, "%s%s", i ? "," : "", apps_get(i)->id);
-    reply("ok fw=" FW_VERSION " net=" NET_NAME " state=%s coins=%s hw=%s batt=%d chg=%d build=%s boot=%s heap=%lu/%lu apps=%d apps_free=%d addrs=%d secure=%d",
+    reply("ok fw=" FW_VERSION " net=" NET_NAME " state=%s coins=%s hw=%s batt=%d chg=%d build=%s boot=%s heap=%lu/%lu apps=%d apps_free=%d addrs=%d secure=%d ota=%s",
            wallet_is_unlocked() ? "ready" : "empty", coins, hal_platform(), menu_battery_mv(), hal_charging(), hal_fw_build(),
            hal_boot_reason(), (unsigned long)hf, (unsigned long)hl, (int)(apps_total() / 1024),
-           (int)(apps_free() / 1024), menu_addr_count(), hal_secure());
+           (int)(apps_free() / 1024), menu_addr_count(), hal_secure(), hal_ota_info());
     return;
   }
   if (!strcmp(cmd, "addrs")) {  // addrs <1|5|10|20>: сколько адресов для получения
@@ -438,6 +438,8 @@ static app_ext_fn g_ext;
 static bool g_busy;
 
 void app_set_ext(app_ext_fn fn) { g_ext = fn; }
+
+bool app_is_busy(void) { return g_busy; }
 
 void app_busy(bool on) {
   g_busy = on;

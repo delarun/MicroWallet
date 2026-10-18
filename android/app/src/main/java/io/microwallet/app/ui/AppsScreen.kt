@@ -24,6 +24,8 @@ import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.InstallMobile
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -44,6 +46,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.microwallet.app.core.AppInfo
+import io.microwallet.app.core.COINS
 import io.microwallet.app.core.FwAsset
 import io.microwallet.app.core.FwRelease
 import io.microwallet.app.core.WasmApp
@@ -160,7 +163,10 @@ private fun Installed(vm: AppViewModel) {
     val s = vm.apps
     Card(padding = PaddingValues(vertical = 14.dp)) {
         Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("На устройстве", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1f)) {
+                Text("На устройстве", style = MaterialTheme.typography.titleMedium)
+                Text("в этом порядке — на главном экране; стрелки меняют", color = C.faint, fontSize = 12.sp)
+            }
             val total = vm.info["apps"]?.toIntOrNull() ?: 0
             val free = vm.info["apps_free"]?.toIntOrNull()
             if (total > 0 && free != null) Text("свободно ${free} из $total КБ", color = C.faint, fontSize = 12.sp)
@@ -187,6 +193,12 @@ private fun Installed(vm: AppViewModel) {
                         Text(a.name, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = C.text)
                         Text("${a.id} · v${a.version}", fontSize = 12.sp, color = C.faint, fontFamily = Mono)
                     }
+                    // порядок на главном экране устройства
+                    val idx = l.v.indexOf(a)
+                    SmallIconButton(Icons.Rounded.KeyboardArrowUp, "Выше", { vm.moveApp(a.id, -1) }, enabled = idx > 0 && s.removing == null)
+                    SmallIconButton(Icons.Rounded.KeyboardArrowDown, "Ниже", { vm.moveApp(a.id, 1) },
+                        enabled = idx < l.v.size - 1 && s.removing == null)
+                    Spacer(Modifier.width(4.dp))
                     if (s.removing == a.id) CircularProgressIndicator(Modifier.size(20.dp), color = C.bad, strokeWidth = 2.dp)
                     else SmallIconButton(Icons.Rounded.Delete, "Удалить", { vm.removeApp(a.id, a.name) }, enabled = s.removing == null)
                 }
@@ -227,20 +239,17 @@ private fun Catalog(vm: AppViewModel, pickFile: () -> Unit) {
             is Load.Ok -> {
                 if (c.v.isEmpty()) Text("В релизах нет файлов microwallet-app-*.wasm", color = C.muted, fontSize = 14.sp,
                     modifier = Modifier.padding(top = 12.dp))
-                for ((asset, rel) in c.v) {
-                    Spacer(Modifier.height(10.dp))
-                    Divider()
-                    Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        val id = asset.name.removePrefix("microwallet-app-").substringBefore('-')
-                        AppIcon(id, 36.dp)
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(asset.name.removePrefix("microwallet-app-").removeSuffix(".wasm"), color = C.text,
-                                fontSize = 14.sp, fontFamily = Mono)
-                            Text("${rel.tag} · ${kb(asset.size)}", color = C.faint, fontSize = 12.sp)
-                        }
-                        SecondaryButton("Скачать", { vm.downloadApp(asset) }, enabled = s.phase == AppPhase.List)
-                    }
+                // Одна строка на приложение; версия — в меню «Скачать»
+                val have = (s.installed as? Load.Ok)?.v.orEmpty()
+                val byId = c.v.groupBy { (asset, _) -> asset.name.removePrefix("microwallet-app-").substringBefore('-') }
+                for ((id, list) in byId.entries.sortedBy { it.key }) {
+                    val options = list.map { (asset, rel) ->
+                        val ver = asset.name.removePrefix("microwallet-app-").removeSuffix(".wasm").substringAfter('-')
+                        VersionOption(ver, "${rel.tag} · ${kb(asset.size)}", rel.prerelease) { vm.downloadApp(asset) }
+                    }.sortedWith { a, b -> versionCmp(b.version, a.version) }
+                    val mine = have.firstOrNull { it.id == id }
+                    val name = mine?.name ?: COINS.firstOrNull { it.id == id }?.name ?: id
+                    VersionRow(name, mine?.version, options, enabled = s.phase == AppPhase.List) { AppIcon(id, 36.dp) }
                 }
             }
             else -> {}

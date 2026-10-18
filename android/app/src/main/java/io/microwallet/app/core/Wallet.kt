@@ -89,6 +89,10 @@ interface WalletApi {
     fun removeApp(id: String) {
         throw WalletError("Приложения недоступны")
     }
+    /** Порядок приложений на главном экране устройства (прошивки с v0.7). */
+    fun setAppOrder(ids: List<String>) {
+        throw WalletError("Приложения недоступны")
+    }
     /** Обновить прошивку ESP32 (по USB или BLE). Устройство попросит подтверждение. */
     fun updateFirmware(img: FwImage, onProgress: (Int, Int) -> Unit) {
         throw WalletError("Обновление прошивки недоступно")
@@ -114,6 +118,18 @@ fun vsizeEstimate(nIn: Int, outScripts: List<ByteArray>, inVbytes: Double): Long
     ceil(11 + inVbytes * nIn + outScripts.sumOf { 9 + it.size }).toLong()
 
 /** Запрос на подпись для прошивки (формат src/tx.c). */
+/** zlib (уровень 9) — для сжатого обновления прошивки (ota zbegin). */
+fun deflate(data: ByteArray): ByteArray {
+    val d = java.util.zip.Deflater(9)
+    d.setInput(data)
+    d.finish()
+    val out = java.io.ByteArrayOutputStream(data.size / 2)
+    val buf = ByteArray(64 * 1024)
+    while (!d.finished()) out.write(buf, 0, d.deflate(buf))
+    d.end()
+    return out.toByteArray()
+}
+
 /** Запрос на подпись блоком (sign @): запрос, затем для BTC — предыдущие транзакции входов
  *  целиком (u32 длина + байты): по ним устройство само проверяет суммы входов. */
 fun signBlob(tx: UtxoTx, prev: List<ByteArray> = emptyList()): ByteArray {
@@ -223,6 +239,16 @@ class Wallet(
         apps()
     }
 
+    override fun setAppOrder(ids: List<String>) {
+        try {
+            dev.call("apps order " + ids.joinToString(","))
+        } catch (e: DeviceError) {
+            if (e.message == "unknown command") throw WalletError("Нужна прошивка новее: обнови устройство")
+            throw e
+        }
+        apps()
+    }
+
     // Адреса детерминированы — по BLE каждый запрос стоит времени, кэшируем
     private val addrCache = ConcurrentHashMap<String, String>()
 
@@ -273,12 +299,39 @@ class Wallet(
         if (!hw.startsWith("esp32")) throw WalletError("Обновление по воздуху есть только у ESP32-S3")
         if (img.chip != hw) throw WalletError("Образ собран для ${img.chip}, а устройство — $hw")
         val image = img.bytes
+        // Сжатый поток (прошивки с v0.7): данных на ~40% меньше; старые ответят «unknown»
+        // ещё до экрана подтверждения — тогда как раньше
+        var z: ByteArray? = null
         try {
-            dev.call("ota begin ${image.size} ${img.sha256}")  // ждёт кнопку на устройстве
+            dev.call("ota zbegin ${image.size} ${img.sha256}")  // ждёт кнопку на устройстве
+            z = deflate(image)
+        } catch (e: DeviceError) {
+            if (e.message != "unknown ota command") throw e
+        }
+        if (z == null) try {
+            dev.call("ota begin ${image.size} ${img.sha256}")
         } catch (e: DeviceError) {
             if (e.message?.startsWith("unknown") == true)
                 throw WalletError("Эта прошивка не умеет обновляться по Bluetooth — один раз обнови её по USB")
             throw e
+        }
+        if (z != null) {
+            try {
+                val enc = java.util.Base64.getEncoder()
+                val lines = (z.indices step 2048).map { "ota b64 " + enc.encodeToString(z.copyOfRange(it, minOf(it + 2048, z.size))) }
+                dev.stream(lines, 4) { k -> onProgress(minOf(image.size, (k.toLong() * image.size / lines.size).toInt()), image.size) }
+            } catch (e: Exception) {
+                runCatching { dev.call("ota abort") }
+                throw e
+            }
+            try {
+                dev.call("ota end")
+            } catch (e: DeviceError) {
+                throw e
+            } catch (e: WalletError) {
+                // Устройство могло перезагрузиться раньше, чем дошёл ответ, — это успех
+            }
+            return
         }
         try {
             // base64 по 2 КБ (прошивки с v0.5); старые понимают только hex по 1 КБ

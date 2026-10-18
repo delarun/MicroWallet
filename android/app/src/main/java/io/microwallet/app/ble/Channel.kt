@@ -160,6 +160,9 @@ class Channel(
         return recvData(timeoutMs)
     }
 
+    /** Следующий ответ (для отправки строк конвейером: sendLine подряд, ответы по порядку). */
+    fun recvLine(timeoutMs: Long?): String = recvData(timeoutMs)
+
     /** Для тестов: зашифровать кадр текущим ключом (проверка подмены). */
     internal fun sealForTest(ctr: Long, line: String): ByteArray {
         val hdr = byteArrayOf(T_DATA.toByte()) + be64(ctr)
@@ -191,6 +194,25 @@ class BleDevice(
 
     @Synchronized
     override fun call(line: String): String = parseReply(channel.call(line))
+
+    /** До window строк в полёте: радио не простаивает, пока устройство пишет флеш. */
+    @Synchronized
+    override fun stream(lines: List<String>, window: Int, onReply: (Int) -> Unit) {
+        var sent = 0
+        var got = 0
+        while (got < lines.size) {
+            while (sent < lines.size && sent - got < window) channel.sendLine(lines[sent++])
+            val r = channel.recvLine(60_000)
+            got++
+            try {
+                parseReply(r)
+            } catch (e: DeviceError) {
+                repeat(sent - got) { runCatching { channel.recvLine(60_000) } }  // дочитать отправленное
+                throw e
+            }
+            onReply(got)
+        }
+    }
 
     override fun close() = transport.close()
 }

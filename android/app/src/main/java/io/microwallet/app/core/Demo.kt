@@ -124,6 +124,9 @@ class DemoWallet(empty: Boolean = false, private val wordlist: List<String> = em
         Thread.sleep(1500)
         demoApps.removeAll { it.id == id }
     }
+    override fun setAppOrder(ids: List<String>) {
+        demoApps.sortBy { a -> ids.indexOf(a.id).let { if (it < 0) Int.MAX_VALUE else it } }
+    }
 
     override fun setAddrCount(n: Int) {
         info = info + ("addrs" to n.toString())

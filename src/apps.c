@@ -15,6 +15,7 @@
 #include "menu.h"
 #include "sha2.h"
 #include "sha3.h"
+#include "storage.h"
 #include "oled.h"
 #include "ui.h"
 #include "ux.h"
@@ -169,6 +170,8 @@ void apps_paths_str(const mwapp_t *a, char *out, int outlen) {
 
 // ---------- хранилище ----------
 
+static void apply_order(void);
+
 void apps_init(void) {
   uint32_t size = hal_apps_size(), off = 0;
   g_count = 0;
@@ -199,6 +202,35 @@ void apps_init(void) {
       }
     }
     off += span_of(h.len);
+  }
+  apply_order();
+}
+
+// Порядок на главном экране — сохранённый список id; кого в нём нет (только что
+// поставленные), те в конце, в порядке раздела
+static int order_pos(const char *order, const char *id) {
+  int pos = 0;
+  for (const char *p = order; *p; pos++) {
+    const char *e = strchr(p, ',');
+    size_t n = e ? (size_t)(e - p) : strlen(p);
+    if (n == strlen(id) && !memcmp(p, id, n)) return pos;
+    if (!e) break;
+    p = e + 1;
+  }
+  return MAX_APPS + 1;
+}
+
+static void apply_order(void) {
+  char order[MAX_APPS * 10];
+  apps_order_load(order, sizeof order);
+  for (int i = 1; i < g_count; i++) {  // вставками, устойчиво
+    mwapp_t a = g_apps[i];
+    int pa = order_pos(order, a.id), j = i;
+    while (j > 0 && order_pos(order, g_apps[j - 1].id) > pa) {
+      g_apps[j] = g_apps[j - 1];
+      j--;
+    }
+    g_apps[j] = a;
   }
 }
 
@@ -1060,6 +1092,26 @@ bool apps_remove(const mwapp_t *a) {
 }
 
 bool apps_line(char *line, app_reply_fn reply) {
+  if (!strncmp(line, "apps order ", 11)) {  // apps order btc,prl,… — порядок на главном экране
+    char order[MAX_APPS * 10];
+    snprintf(order, sizeof order, "%s", line + 11);
+    for (char *p = order; *p; p++)
+      if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == ',')) {
+        reply("err usage: apps order <id>,<id>,...");
+        return true;
+      }
+    if (!apps_order_save(order)) {
+      reply("err storage");
+      return true;
+    }
+    apply_order();
+    if (!app_is_busy()) {
+      menu_reset();
+      menu_draw();
+    }
+    reply("ok");
+    return true;
+  }
   if (!strcmp(line, "apps")) {
     static char out[APP_LINE_MAX];
     int o = snprintf(out, sizeof out, "ok");

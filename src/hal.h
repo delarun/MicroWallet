@@ -24,6 +24,9 @@ bool hal_i2c_write(const uint8_t *buf, size_t len);  // на адрес экра
 void hal_reboot_bootloader(void);  // режим прошивки по USB
 const char *hal_platform(void);    // "esp32s3" | "sim"
 bool hal_secure(void);             // Secure Boot и шифрование флеша включены (eFuse)
+// Слоты прошивки: "ota_0/aborted" — работает ota_0, а новая прошивка в другом слоте не
+// прижилась (упала в первые 30 с — загрузчик откатил); new, valid, pending, invalid
+const char *hal_ota_info(void);
 const char *hal_fw_build(void);    // id сборки (ESP32: начало SHA-256 ELF) или "-"
 
 // Связь. В симуляторе BLE нет — заглушки возвращают false.

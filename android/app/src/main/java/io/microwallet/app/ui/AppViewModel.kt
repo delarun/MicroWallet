@@ -353,6 +353,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         })
     }
 
+    /** Сдвинуть приложение на главном экране устройства: delta -1 — выше, +1 — ниже. */
+    fun moveApp(id: String, delta: Int) {
+        val w = wallet ?: return
+        val list = (apps.installed as? Load.Ok)?.v ?: return
+        val i = list.indexOfFirst { it.id == id }
+        val j = i + delta
+        if (i < 0 || j !in list.indices) return
+        val order = list.toMutableList().apply { add(j, removeAt(i)) }
+        apps.installed = Load.Ok(order)  // сразу на экране; устройство — следом
+        run({ w.setAppOrder(order.map { it.id }); w.apps() }, {
+            apps.installed = Load.Ok(it)
+            coinsVersion++
+        }, {
+            message = it
+            loadInstalled()
+        })
+    }
+
     // ---------------- прошивка ----------------
 
     fun openFirmware() {

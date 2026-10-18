@@ -286,6 +286,25 @@ class BleDevice:
             resp = self.ch.call(line)
         return W.parse_reply(resp)
 
+    def stream(self, lines, window=4, on_reply=None):
+        """Строки подряд, до window в полёте (см. wallet.Device.stream)."""
+        with self.lock:
+            sent = got = 0
+            while got < len(lines):
+                while sent < len(lines) and sent - got < window:
+                    self.ch.send_line(lines[sent])
+                    sent += 1
+                resp = self.ch._recv_data(60)
+                got += 1
+                try:
+                    W.parse_reply(resp)
+                except W.DeviceError:
+                    for _ in range(sent - got):
+                        self.ch._recv_data(60)
+                    raise
+                if on_reply:
+                    on_reply(got)
+
     def info(self):
         return dict(kv.split("=", 1) for kv in self.call("info").split() if "=" in kv)
 

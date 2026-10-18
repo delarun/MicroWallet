@@ -213,50 +213,40 @@ private fun PickSource(vm: AppViewModel, hw: String, net: String, pickFile: () -
                 Spacer(Modifier.height(12.dp))
                 Text("Релизов нет", color = C.muted, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 4.dp))
             }
-            for (rel in r.v) {
+            if (r.v.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
-                ReleaseCard(vm, rel, hw, net)
+                FirmwareVersions(vm, r.v, hw, net)
             }
         }
         else -> {}
     }
 }
 
+/** Прошивка: строка на сеть (текущая и другая — ею сеть и переключается), версия — в меню. */
 @Composable
-private fun ReleaseCard(vm: AppViewModel, rel: FwRelease, hw: String, net: String) {
-    // Сначала сборка для текущей сети, затем для другой — ею сеть и переключается
-    val assets = listOf(net, if (net == "mainnet") "testnet" else "mainnet")
-        .mapNotNull { n -> rel.assets.firstOrNull { it.name == fwAssetName(hw, n, vm.info["secure"] == "1") }?.let { n to it } }
+private fun FirmwareVersions(vm: AppViewModel, rels: List<FwRelease>, hw: String, net: String) {
+    val secure = vm.info["secure"] == "1"
     Card(padding = androidx.compose.foundation.layout.PaddingValues(18.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(rel.name, style = MaterialTheme.typography.titleMedium)
-                Text("${rel.tag} · ${rel.date}", color = C.faint, fontSize = 12.sp)
-            }
-            if (rel.prerelease) Badge("ТЕСТ", C.warn)
-        }
-        val notes = rel.notes.lines().filter { it.isNotBlank() }.take(6)
-        if (notes.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
-            Text(notes.joinToString("\n"), color = C.muted, fontSize = 12.sp, lineHeight = 17.sp, maxLines = 6)
-        }
-        Spacer(Modifier.height(12.dp))
-        if (assets.isEmpty()) Text("Нет сборки для ${chipName(hw)}", color = C.faint, fontSize = 13.sp)
-        for ((n, asset) in assets) {
-            Divider()
-            Row(Modifier.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Badge(n.uppercase(), if (n == "mainnet") C.ok else C.warn)
-                        Spacer(Modifier.width(8.dp))
-                        Text(if (n == net) "текущая сеть" else "сменить сеть", color = C.muted, fontSize = 12.sp)
-                    }
-                    Text(kb(asset.size), color = C.faint, fontSize = 12.sp, fontFamily = Mono)
+        Text("Прошивка", style = MaterialTheme.typography.titleMedium)
+        if (secure) Text("Плата с Secure Boot — только подписанные сборки", color = C.faint, fontSize = 12.sp)
+        for (n in listOf(net, if (net == "mainnet") "testnet" else "mainnet")) {
+            val options = rels.mapNotNull { rel ->
+                rel.assets.firstOrNull { it.name == fwAssetName(hw, n, secure) }?.let { asset ->
+                    VersionOption(rel.tag, "${rel.date} · ${kb(asset.size)}", rel.prerelease) { vm.fwDownload(asset, rel, n) }
                 }
-                Spacer(Modifier.width(10.dp))
-                SecondaryButton("Скачать", { vm.fwDownload(asset, rel, n) }, enabled = vm.fw.phase == FwPhase.Pick,
-                    icon = Icons.Rounded.CloudDownload)
-            }
+            }.sortedWith { a, b -> versionCmp(b.version, a.version) }
+            VersionRow(
+                n.uppercase(), if (n == net) vm.info["fw"] else null, options,
+                enabled = vm.fw.phase == FwPhase.Pick,
+                subtitle = if (n == net) null else "сменить сеть",
+            ) { CoinIcon("logo", 36.dp) }
+        }
+        val latest = rels.firstOrNull { !it.prerelease } ?: rels.first()
+        val notes = latest.notes.lines().filter { it.isNotBlank() }.take(6)
+        if (notes.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            Text("${latest.name} · ${latest.date}", color = C.muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(notes.joinToString("\n"), color = C.faint, fontSize = 12.sp, lineHeight = 17.sp, maxLines = 6)
         }
     }
 }

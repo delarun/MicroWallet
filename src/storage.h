@@ -27,3 +27,7 @@ typedef struct {
 
 void settings_load(settings_t *s);  // при ошибке — значения по умолчанию
 bool settings_save(const settings_t *s);
+
+// Порядок приложений на главном экране: id через запятую. Нет — пустая строка.
+void apps_order_load(char *out, size_t len);
+bool apps_order_save(const char *s);

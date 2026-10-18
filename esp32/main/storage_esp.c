@@ -63,6 +63,14 @@ void settings_load(settings_t *s) {
 
 bool settings_save(const settings_t *s) { return set_blob("settings", s, sizeof *s); }
 
+void apps_order_load(char *out, size_t len) {
+  size_t n = len - 1;
+  if (!get_blob("order", out, &n)) n = 0;
+  out[n] = 0;
+}
+
+bool apps_order_save(const char *s) { return set_blob("order", s, strlen(s)); }
+
 // ---------- сопряжения BLE: до 4 ПК ----------
 
 static void bonds_load(bond_t b[BONDS]) {

@@ -50,6 +50,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from decimal import Decimal, InvalidOperation
@@ -189,6 +190,29 @@ class Device:
 
     def info(self):
         return dict(kv.split("=", 1) for kv in self.call("info").split() if "=" in kv)
+
+    def stream(self, lines, window=4, on_reply=None):
+        """Строки подряд, не дожидаясь каждого ответа (до window в полёте): устройство
+        обрабатывает их по порядку и по порядку отвечает. Первый «err» — DeviceError."""
+        with self.lock:
+            try:
+                sent = got = 0
+                while got < len(lines):
+                    while sent < len(lines) and sent - got < window:
+                        self.s.write((lines[sent] + "\n").encode())
+                        sent += 1
+                    resp = self.s.readline().decode().strip()
+                    got += 1
+                    try:
+                        parse_reply(resp)
+                    except DeviceError:
+                        for _ in range(sent - got):  # дочитать ответы на отправленное
+                            self.s.readline()
+                        raise
+                    if on_reply:
+                        on_reply(got)
+            except (serial.SerialException, OSError) as e:
+                raise DeviceError(f"связь с устройством потеряна: {e}")
 
     def close(self):
         try:
@@ -625,8 +649,29 @@ class Wallet:
         if chip != hw:
             raise WalletError(f"Образ собран для {chip}, а устройство — {hw}")
         digest = hashlib.sha256(image).hexdigest()
-        self.dev.call(f"ota begin {len(image)} {digest}")  # ждёт кнопку
+        # Сжатый поток (прошивки с v0.7): на ~40% меньше данных; старые ответят «unknown»
+        # ещё до экрана подтверждения — тогда как раньше
         try:
+            self.dev.call(f"ota zbegin {len(image)} {digest}")  # ждёт кнопку
+            z = zlib.compress(image, 9)
+        except DeviceError as e:
+            if str(e) != "unknown ota command":
+                raise
+            self.dev.call(f"ota begin {len(image)} {digest}")
+            z = None
+        try:
+            if z is not None:
+                lines = ["ota b64 " + base64.b64encode(z[o:o + 2048]).decode() for o in range(0, len(z), 2048)]
+                step = len(image) / len(lines)
+                if hasattr(self.dev, "stream"):
+                    self.dev.stream(lines, 4, (lambda k: progress(min(len(image), int(k * step)), len(image)))
+                                    if progress else None)
+                else:
+                    for k, line in enumerate(lines, 1):
+                        self.dev.call(line)
+                        if progress:
+                            progress(min(len(image), int(k * step)), len(image))
+                return self.dev.call("ota end")
             # base64 по 2 КБ (прошивки с v0.5); старые понимают только hex по 1 КБ
             b64, off = True, 0
             while off < len(image):
@@ -1046,6 +1091,8 @@ def main():
     up.add_argument("image", help="build/microwallet.bin")
     sub.add_parser("ble-scan")
     sub.add_parser("apps")
+    ao = sub.add_parser("apps-order", help="порядок приложений на главном экране: btc,prl,…")
+    ao.add_argument("ids")
     ad = sub.add_parser("addrs", help="сколько адресов для получения: 1, 5, 10 или 20")
     ad.add_argument("n", nargs="?", type=int)
     ai = sub.add_parser("app-install")
@@ -1141,6 +1188,9 @@ def main():
             return
         if a.cmd == "app":
             print(dev.call(" ".join(["app", a.id] + a.args)))
+            return
+        if a.cmd == "apps-order":
+            print(dev.call(f"apps order {a.ids}") or "ok")
             return
         if a.cmd == "addrs":
             print(dev.call(f"addrs {a.n}") if a.n else Wallet(dev).addr_count())

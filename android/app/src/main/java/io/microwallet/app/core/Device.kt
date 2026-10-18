@@ -5,6 +5,10 @@ interface Device {
     val label: String
     /** Команда -> текст после "ok". "err ..." -> DeviceError. Может ждать кнопку. */
     fun call(line: String): String
+    /** Строки подряд, до window в полёте; ответы по порядку. Первый «err» — DeviceError. */
+    fun stream(lines: List<String>, window: Int = 4, onReply: (Int) -> Unit = {}) {
+        lines.forEachIndexed { i, l -> call(l); onReply(i + 1) }
+    }
     fun close()
 }
 

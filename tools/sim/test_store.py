@@ -159,8 +159,18 @@ def main():
         (d / "apps.bin").write_bytes(bytes(blob))
         sim = Sim(binary, str(d))
         assert sim.call("app hole hello") == "err app corrupted, reinstall it"
-        sim.close()
         print("5. байт модуля во флеше испорчен — запуск отклонён (SHA-256)")
+
+        # ---- порядок на главном экране ----
+        before = sim.apps()
+        assert sim.call("apps order tron,btc") == "ok"
+        assert sim.apps()[:2] == ["tron", "btc"] and sorted(sim.apps()) == sorted(before)
+        assert sim.call("apps order Bad!").startswith("err usage")
+        sim.close()
+        sim = Sim(binary, str(d))
+        assert sim.apps()[:2] == ["tron", "btc"]  # сохранился
+        sim.close()
+        print("6. порядок приложений на главном экране: меняется командой и переживает перезапуск")
     print("всё прошло")
 
 

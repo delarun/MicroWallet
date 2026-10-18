@@ -34,6 +34,7 @@ bool hal_i2c_write(const uint8_t *buf, size_t len) { (void)buf; (void)len; retur
 void hal_reboot_bootloader(void) {}
 const char *hal_platform(void) { return "sim"; }
 bool hal_secure(void) { return false; }
+const char *hal_ota_info(void) { return "sim"; }
 const char *hal_fw_build(void) { return "-"; }
 bool hal_usb_connected(void) { return true; }
 bool hal_ble_available(void) { return true; }
@@ -96,6 +97,15 @@ void settings_load(settings_t *s) {
   else *s = SETTINGS_DEFAULT;
 }
 bool settings_save(const settings_t *s) { return write_file("settings.bin", s, sizeof *s); }
+
+void apps_order_load(char *out, size_t len) {
+  FILE *f = fopen(path("order.txt"), "rb");
+  size_t n = f ? fread(out, 1, len - 1, f) : 0;
+  if (f) fclose(f);
+  out[n] = 0;
+}
+
+bool apps_order_save(const char *s) { return write_file("order.txt", s, strlen(s)); }
 
 // ---------- сопряжения: до 4 записей id[8] + key[32] ----------
 

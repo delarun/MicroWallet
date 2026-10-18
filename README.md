@@ -224,7 +224,8 @@ BTC, TRON и BSC совпадают байт в байт с `host/wallet.py` (э
 
 ### Обновление прошивки с телефона
 
-Устройство → «Обновить прошивку», источник:
+Устройство → «Обновить прошивку»: по строке на сеть, версия выбирается в меню «Скачать»; установленная —
+зелёным, если в релизах есть новее — «обновление до …» (так же и в каталоге приложений). Источник:
 - **GitHub** (по умолчанию `delarun/MicroWallet`) — релизы репозитория `owner/repo`; в релизе
   нужен файл `microwallet-esp32s3-{testnet,mainnet}-app.bin`, для платы с Secure Boot —
   `…-secure-app.bin` (приложение берёт тот, что подходит устройству);
@@ -514,13 +515,17 @@ BTC: `app btc xpub`, `app btc addr|show <chain> <i>`, `app btc sign @` (запр
 PRL: `app prl addr|show <chain> <i>`, `app prl sign @` (или `sign <hex>`, если запрос влезает в строку);
 TRON: `app tron addr|show <i>`, `app tron sign <i> <raw_data hex>`;
 BSC и ETH: `app bsc|eth addr|show <i>`, `app bsc|eth sign <i> <rlp hex>`;
-прошивка: `ota begin <size> <sha256>`, `ota b64 <base64, до 2048 байт>` (или `ota data <hex>`), `ota end`, `ota abort`;
+прошивка: `ota begin <size> <sha256>` (или `ota zbegin …` — дальше сжатый zlib-поток, на ~40% меньше данных),
+`ota b64 <base64, до 2048 байт>` (или `ota data <hex>`), `ota end`, `ota abort`; хосты шлют куски конвейером
+(до 4 без ожидания ответа);
 приложения: `apps`, `app add <size> <sha256>` / `app add b64 <…>` / `app add end`, `app rm <id>`, `app <id> <команда>`;
 большие данные: `app put <size> <sha256>` / `app put b64 <…>` / `app put end` — блок до 512 КБ для следующей
 команды, которая кончается на ` @` (приложение читает его `mw_blob_read`); ответ длиннее строки приходит как
 `ok @<size> <sha256>` и забирается `app get <offset>` (хелперы: `wallet.app_call`, Android `Device.appCall`).
-`addrs <1|5|10|20>` — сколько адресов для получения.
-`info`: `fw`, `net`, `state`, `coins` (установленные приложения), `hw=esp32s3`, `batt` (мВ), `chg`, `build`, `boot` (причина запуска, после сбоя — с шагом: `brown@ble`), `heap`, `apps` и `apps_free` (КБ), `addrs`, `secure` (Secure Boot и шифрование включены).
+`addrs <1|5|10|20>` — сколько адресов для получения; `apps order <id>,<id>,…` — порядок приложений на главном экране
+(в приложении для телефона — стрелки в «Приложения → На устройстве»).
+`info`: `fw`, `net`, `state`, `coins` (установленные приложения), `hw=esp32s3`, `batt` (мВ), `chg`, `build`, `boot` (причина запуска, после сбоя — с шагом: `brown@ble`), `heap`, `apps` и `apps_free` (КБ), `addrs`, `secure` (Secure Boot и шифрование включены), `ota` (`ota_0/valid`: рабочий слот и состояние другого; `aborted` —
+новая прошивка не прижилась, загрузчик откатил).
 Хосты понимают и прошивки до v0.6 со встроенными монетами (команды без `app <id>`).
 
 ## Известные слабые места

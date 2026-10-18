@@ -10,6 +10,7 @@
 #include "hal.h"
 #include "icons.h"
 #include "memzero.h"
+#include "miniz.h"  // esp_rom: tinfl_decompress лежит в ROM ESP32-S3
 #include "menu.h"
 #include "oled.h"
 #include "sha2.h"
@@ -29,6 +30,13 @@ static uint8_t want[32];
 static bool active, over_ble;
 static int shown = -1;
 static uint64_t last_us;
+
+// Сжатый поток (ota zbegin): zlib, распаковывается на лету в запись OTA. Образ жмётся
+// примерно на 40% — по BLE это и есть 40% времени. Размер и SHA-256 — распакованного образа.
+static tinfl_decompressor *zr;
+static uint8_t *zdict;  // окно словаря 32 КБ (кольцевое)
+static size_t zpos;
+static bool zmode, zdone;
 
 static long unhex(const char *s, uint8_t *out, size_t max) {
   size_t n = s ? strlen(s) : 0;
@@ -88,8 +96,17 @@ static void pm_hold(bool on) {
 #endif
 }
 
+static void z_free(void) {
+  free(zr);
+  free(zdict);
+  zr = NULL;
+  zdict = NULL;
+  zmode = zdone = false;
+}
+
 static void stop(void) {
   if (active) esp_ota_abort(h);
+  z_free();
   active = false;
   shown = -1;
   pm_hold(false);
@@ -104,14 +121,26 @@ static void progress(void) {
   oled_show();
 }
 
-static void begin(const char *size_s, const char *sha_s, app_reply_fn reply) {
+static void begin(const char *size_s, const char *sha_s, bool z, app_reply_fn reply) {
   char *e;
   unsigned long size = size_s ? strtoul(size_s, &e, 10) : 0;
   if (!size || *e || unhex(sha_s, want, 32) != 32) {
-    reply("err usage: ota begin <size> <sha256>");
+    reply("err usage: ota begin|zbegin <size> <sha256>");
     return;
   }
   stop();
+  if (z) {
+    zr = malloc(sizeof *zr);
+    zdict = malloc(TINFL_LZ_DICT_SIZE);
+    if (!zr || !zdict) {
+      z_free();
+      reply("err out of memory");
+      return;
+    }
+    tinfl_init(zr);
+    zpos = 0;
+    zmode = true;
+  }
   if (app_battery_low()) {  // запись прошивки — долгий пик тока
     reply("err battery low, connect USB");
     menu_draw();
@@ -133,12 +162,14 @@ static void begin(const char *size_s, const char *sha_s, app_reply_fn reply) {
       {UX_REJECT, ICON_CROSS, "Reject", "hold to cancel"},
   };
   if (!ux_review(st, 5)) {
+    z_free();
     reply("err rejected");
     ux_flash(ICON_CROSS, "Rejected", NULL, 900);
     menu_draw();
     return;
   }
   if (esp_ota_begin(part, size, &h) != ESP_OK) {
+    z_free();
     reply("err ota begin failed");
     menu_draw();
     return;
@@ -154,31 +185,63 @@ static void begin(const char *size_s, const char *sha_s, app_reply_fn reply) {
   reply("ok");
 }
 
+// Готовые байты образа: в слот OTA и в SHA-256. 0 — ок, иначе текст ошибки
+static const char *sink(const uint8_t *p, size_t n) {
+  if (done + n > total) return "err bad chunk";
+  if (esp_ota_write(h, p, n) != ESP_OK) return "err flash write failed";
+  sha256_Update(&sha, p, n);
+  done += n;
+  return 0;
+}
+
+// Кусок сжатого потока -> распаковка в окно словаря -> sink
+static const char *z_feed(const uint8_t *in, size_t n) {
+  for (;;) {
+    size_t in_n = n, out_n = TINFL_LZ_DICT_SIZE - zpos;
+    tinfl_status st = tinfl_decompress(zr, in, &in_n, zdict, zdict + zpos, &out_n,
+                                       TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_HAS_MORE_INPUT);
+    in += in_n;
+    n -= in_n;
+    if (out_n) {
+      const char *e = sink(zdict + zpos, out_n);
+      if (e) return e;
+      zpos = (zpos + out_n) & (TINFL_LZ_DICT_SIZE - 1);
+    }
+    if (st == TINFL_STATUS_DONE) {
+      zdone = true;
+      return n ? "err bad chunk" : 0;  // после конца потока данных быть не должно
+    }
+    if (st < 0) return "err bad compressed data";
+    if (st == TINFL_STATUS_NEEDS_MORE_INPUT && !n) return 0;
+    if (zdone) return "err bad chunk";
+  }
+}
+
 static void data(const char *enc, bool b64, app_reply_fn reply) {
   static uint8_t buf[OTA_CHUNK];
   long n = b64 ? unb64(enc, buf, sizeof buf) : unhex(enc, buf, sizeof buf);
+  const char *e = 0;
   if (!active) {
     reply("err no update in progress");
-  } else if (n <= 0 || done + n > total) {
-    stop();
-    reply("err bad chunk");
-    menu_draw();
-  } else if (esp_ota_write(h, buf, n) != ESP_OK) {
-    stop();
-    reply("err flash write failed");
-    menu_draw();
-  } else {
-    sha256_Update(&sha, buf, n);
-    done += n;
-    last_us = hal_time_us();
-    progress();
-    reply("ok");
+    return;
   }
+  if (n <= 0) e = "err bad chunk";
+  else if (zmode) e = zdone ? "err bad chunk" : z_feed(buf, (size_t)n);
+  else e = sink(buf, (size_t)n);
+  if (e) {
+    stop();
+    reply(e);
+    menu_draw();
+    return;
+  }
+  last_us = hal_time_us();
+  progress();
+  reply("ok");
 }
 
 static void end(app_reply_fn reply) {
   uint8_t got[32];
-  if (!active || done != total) {
+  if (!active || done != total || (zmode && !zdone)) {
     stop();
     reply("err incomplete image");
     menu_draw();
@@ -193,6 +256,7 @@ static void end(app_reply_fn reply) {
     return;
   }
   active = false;
+  z_free();
   // esp_ota_end проверяет образ, а при Secure Boot — и его подпись
   esp_err_t err = esp_ota_end(h);
   pm_hold(false);
@@ -231,9 +295,10 @@ void ota_link_lost(void) {
 bool ota_line(char *line, app_reply_fn reply, bool ble) {
   if (strncmp(line, "ota ", 4)) return false;
   char *cmd = strtok(line + 4, " "), *a1 = strtok(NULL, " "), *a2 = strtok(NULL, " ");
-  if (cmd && !strcmp(cmd, "begin")) over_ble = ble;
+  if (cmd && (!strcmp(cmd, "begin") || !strcmp(cmd, "zbegin"))) over_ble = ble;
   if (!cmd) reply("err usage");
-  else if (!strcmp(cmd, "begin")) begin(a1, a2, reply);
+  else if (!strcmp(cmd, "begin")) begin(a1, a2, false, reply);
+  else if (!strcmp(cmd, "zbegin")) begin(a1, a2, true, reply);
   else if (!strcmp(cmd, "b64")) data(a1, true, reply);
   else if (!strcmp(cmd, "data")) data(a1, false, reply);
   else if (!strcmp(cmd, "end")) end(reply);
