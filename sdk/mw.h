@@ -16,6 +16,14 @@
 // ---- ответ ----
 MW_IMPORT("reply") void mw_reply(const char *s, size_t len);  // ok <текст>
 MW_IMPORT("fail") void mw_fail(const char *s, size_t len);    // err <текст>
+// Дописать к ответу (после mw_reply): длинный ответ хост заберёт кусками — до 256 КБ
+MW_IMPORT("reply_more") void mw_reply_more(const char *s, size_t len);
+
+// ---- большой вход: команда кончается на « @», данные хост загрузил заранее (app put) ----
+MW_IMPORT("blob_size") int mw_blob_size(void);  // размер, -1 — у вызова нет данных
+MW_IMPORT("blob_read") int mw_blob_read(uint32_t off, void *buf, uint32_t len);  // прочитано, -1 — ошибка
+// SHA-256 (dbl=1 — двойной) склейки n кусков блока: ranges = {смещение, длина} × n, n ≤ 64
+MW_IMPORT("blob_sha256") int mw_blob_sha256(const uint32_t *ranges, int n, int dbl, uint8_t out[32]);
 
 // ---- сеть сборки: 0 — testnet, 1 — mainnet ----
 MW_IMPORT("net") int mw_net(void);

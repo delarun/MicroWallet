@@ -97,12 +97,35 @@ def install(sim, wasm):
     return sim.call("app add end")
 
 
+def put(sim, data):
+    """Загрузить блок для следующей команды «… @»."""
+    r = sim.call(f"app put {len(data)} {hashlib.sha256(data).hexdigest()}")
+    assert r == "ok", r
+    for off in range(0, len(data), 2048):
+        r = sim.call("app put b64 " + base64.b64encode(data[off:off + 2048]).decode())
+        assert r == "ok", r
+    return sim.call("app put end")
+
+
+def fetch(sim, reply):
+    """«ok @<размер> <sha256>» -> весь ответ (кусками через app get)."""
+    size, sha = reply[4:].split()
+    data = b""
+    while len(data) < int(size):
+        r = sim.call(f"app get {len(data)}")
+        assert r.startswith("ok "), r
+        data += base64.b64decode(r[3:])
+    assert len(data) == int(size) and hashlib.sha256(data).hexdigest() == sha
+    return data.decode()
+
+
 def main():
     binary = sys.argv[1]
     ok = 0
     with tempfile.TemporaryDirectory() as tmp:
         eth = build(ROOT / "apps/eth/eth.c", Path(tmp) / "eth.wasm")
         evil = build(ROOT / "tools/sim/test_apps/evil/evil.c", Path(tmp) / "evil.wasm")
+        blob = build(ROOT / "tools/sim/test_apps/blob/blob.c", Path(tmp) / "blob.wasm")
         d = Path(tmp) / "dev"
         d.mkdir()
         sim = Sim(binary, str(d))
@@ -181,10 +204,42 @@ def main():
         print("6. песочница: чужой ключ, подпись без «Accept», выход за память, trap, вечный цикл — не проходят")
         ok += 1
 
+        # ---- большие данные: вход блоком, длинный ответ кусками ----
+        assert install(sim, blob) == "ok"
+        data = os.urandom(300 * 1024)
+        assert put(sim, data) == "ok"
+        assert sim.call("app blob sum @") == "ok " + hashlib.sha256(data).hexdigest()
+        assert sim.call("app blob sum @").startswith("err no data")  # блок одноразовый
+        assert sim.call("app blob sum") == "err no blob"              # без « @» данных не видно
+        bad = bytearray(data[:5000])
+        r = sim.call(f"app put {len(bad)} {hashlib.sha256(bytes(bad)).hexdigest()}")
+        bad[100] ^= 1  # испорчен при передаче
+        for off in range(0, len(bad), 2048):
+            sim.call("app put b64 " + base64.b64encode(bytes(bad[off:off + 2048])).decode())
+        assert sim.call("app put end").startswith("err"), "испорченный блок принят"
+        assert sim.call(f"app put {600 * 1024} {'00' * 32}").startswith("err usage")  # больше 512 КБ
+        r = sim.call("app blob big 100")
+        assert r == "ok " + "".join(chr(97 + i % 26) for i in range(100)), r
+        r = sim.call("app blob big 20000")
+        assert r.startswith("ok @20000 "), r[:40]
+        want = "".join(chr(97 + i % 26) for i in range(1000))
+        assert fetch(sim, r) == (want * 20)[:20000]
+        assert sim.call("app get 0").startswith("ok ")      # длинный ответ живёт до следующего вызова
+        assert sim.call("app blob big 5") == "ok abcde"
+        assert sim.call("app get 0").startswith("err")      # …который его стирает
+        class Dev:  # тот же интерфейс, что у USB- и BLE-устройства хоста
+            call = staticmethod(lambda line: W.parse_reply(sim.call(line)))
+        assert W.app_call(Dev, "app blob sum", data) == hashlib.sha256(data).hexdigest()
+        assert W.app_call(Dev, "app blob big 20000") == (want * 20)[:20000]
+        assert W.app_call(Dev, "app blob big 7") == "abcdefg"
+        print("7. большие данные: блок 300 КБ (sha, одноразовый, порча), ответ 20 КБ кусками, хелпер хоста")
+        ok += 1
+
         # ---- обновление, удаление ----
         assert install(sim, eth) == "ok"  # тот же id — замена в том же слоте
         assert sim.call("apps").count("eth|") == 1
         assert sim.call("app rm evil") == "ok"
+        assert sim.call("app rm blob") == "ok"
         assert sim.call("apps") == "ok eth|1.0|Ethereum"
         sim.close()
 
@@ -198,9 +253,9 @@ def main():
             rej.call("app add b64 " + base64.b64encode(evil[off:off + 2048]).decode())
         assert bad_sha == "ok" and rej.call("app add end") == "err sha256 mismatch"
         rej.close()
-        print("7. обновление в том же слоте, удаление, отказы кнопкой, чужой хеш")
+        print("8. обновление в том же слоте, удаление, отказы кнопкой, чужой хеш")
         ok += 1
-    print(f"всё прошло: {ok}/7")
+    print(f"всё прошло: {ok}/8")
 
 
 if __name__ == "__main__":

@@ -498,7 +498,10 @@ PRL: `app prl addr|show <chain> <i>`, `app prl sign <hex>`;
 TRON: `app tron addr|show <i>`, `app tron sign <i> <raw_data hex>`;
 BSC и ETH: `app bsc|eth addr|show <i>`, `app bsc|eth sign <i> <rlp hex>`;
 прошивка: `ota begin <size> <sha256>`, `ota b64 <base64, до 2048 байт>` (или `ota data <hex>`), `ota end`, `ota abort`;
-приложения: `apps`, `app add <size> <sha256>` / `app add b64 <…>` / `app add end`, `app rm <id>`, `app <id> <команда>`.
+приложения: `apps`, `app add <size> <sha256>` / `app add b64 <…>` / `app add end`, `app rm <id>`, `app <id> <команда>`;
+большие данные: `app put <size> <sha256>` / `app put b64 <…>` / `app put end` — блок до 512 КБ для следующей
+команды, которая кончается на ` @` (приложение читает его `mw_blob_read`); ответ длиннее строки приходит как
+`ok @<size> <sha256>` и забирается `app get <offset>` (хелперы: `wallet.app_call`, Android `Device.appCall`).
 `addrs <1|5|10|20>` — сколько адресов для получения.
 `info`: `fw`, `net`, `state`, `coins` (установленные приложения), `hw=esp32s3`, `batt` (мВ), `chg`, `build`, `boot` (причина запуска, после сбоя — с шагом: `brown@ble`), `heap`, `apps` и `apps_free` (КБ), `addrs`, `secure` (Secure Boot и шифрование включены).
 Хосты понимают и прошивки до v0.6 со встроенными монетами (команды без `app <id>`).

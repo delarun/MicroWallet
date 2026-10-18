@@ -248,8 +248,58 @@ static ux_kind_t g_fkind[FIELDS];
 static const uint8_t *g_ficon[FIELDS];
 static int g_nfields;
 
+// ---------- большие данные: вход «@» и длинный ответ ----------
+// Строка команды — до APP_LINE_MAX, поэтому большой вход (транзакция с prev tx, PSBT)
+// загружается заранее блоком в PSRAM (app put …) и отдаётся вызову, который кончается
+// на « @». Ответ приложения копится в буфере: короткий уходит строкой, длинный —
+// «ok @<размер> <sha256>», и хост забирает его кусками (app get <смещение>).
+#define BLOB_MAX (512 * 1024)
+#define RBUF_MAX (256 * 1024)
+#define LINE_REPLY 3000
+static uint8_t *g_blob, g_blob_sha[32];
+static uint32_t g_blob_len, g_blob_got;
+static bool g_blob_ready, g_blob_on;  // загружен и проверен / доступен текущему вызову
+static char *g_rbuf, *g_big;          // ответ текущего вызова / длинный ответ для app get
+static uint32_t g_rlen, g_rcap, g_big_len;
+static bool g_buffered;  // приложение ответило «ok», ответ ещё в буфере
+
+static void blob_reset(void) {
+  free(g_blob);
+  g_blob = NULL;
+  g_blob_len = g_blob_got = 0;
+  g_blob_ready = false;
+}
+
+static void big_reset(void) {
+  free(g_big);
+  g_big = NULL;
+  g_big_len = 0;
+}
+
+static bool rbuf_add(const char *s, uint32_t len) {
+  if (g_rlen + len > RBUF_MAX) return false;
+  if (g_rlen + len > g_rcap) {
+    uint32_t cap = g_rcap ? g_rcap * 2 : 1024;
+    while (cap < g_rlen + len) cap *= 2;
+    char *n = realloc(g_rbuf, cap);
+    if (!n) return false;
+    g_rbuf = n;
+    g_rcap = cap;
+  }
+  memcpy(g_rbuf + g_rlen, s, len);
+  g_rlen += len;
+  return true;
+}
+
+static void rbuf_reset(void) {
+  free(g_rbuf);
+  g_rbuf = NULL;
+  g_rlen = g_rcap = 0;
+  g_buffered = false;
+}
+
 static void out_text(const char *prefix, const char *s, uint32_t len) {
-  static char line[4096];  // подписи BTC: до 16 входов × (DER + ключ) ≈ 3.5 КБ
+  static char line[4096];
   if (g_replied) return;
   g_replied = true;
   g_ok = !strncmp(prefix, "ok", 2);
@@ -261,6 +311,30 @@ static void out_text(const char *prefix, const char *s, uint32_t len) {
   for (char *p = line; *p; p++)
     if (*p == '\n' || *p == '\r') *p = ' ';  // ответ — одна строка
   g_out(line);
+}
+
+static void reply_flush(void) {
+  if (!g_buffered) return;
+  g_buffered = false;
+  g_replied = false;
+  for (uint32_t i = 0; i < g_rlen; i++)
+    if (g_rbuf[i] == '\n' || g_rbuf[i] == '\r') g_rbuf[i] = ' ';  // ответ — одна строка
+  if (g_rlen <= LINE_REPLY) {
+    out_text("ok ", g_rbuf ? g_rbuf : "", g_rlen);
+  } else {
+    char line[96], hex[65];
+    uint8_t sha[32];
+    big_reset();
+    g_big = g_rbuf;
+    g_big_len = g_rlen;
+    g_rbuf = NULL;
+    g_rlen = g_rcap = 0;
+    sha256_Raw((const uint8_t *)g_big, g_big_len, sha);
+    for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "%02x", sha[i]);
+    snprintf(line, sizeof line, "@%lu %s", (unsigned long)g_big_len, hex);
+    out_text("ok ", line, strlen(line));
+  }
+  rbuf_reset();
 }
 
 // Первая подпись после «Accept»: экран, пока считается (у BTC до 16 входов)
@@ -297,7 +371,50 @@ static bool path_allowed(const uint32_t *p, uint32_t n) {
 
 static void n_reply(wasm_exec_env_t e, uint32_t off, uint32_t len) {
   const char *s = mem(e, off, len);
-  if (s) out_text("ok ", s, len);
+  if (!s || g_replied) return;  // отвечают один раз
+  g_replied = g_ok = g_buffered = true;
+  if (!rbuf_add(s, len)) wasm_runtime_set_exception(wasm_runtime_get_module_inst(e), "reply too long");
+}
+
+static void n_reply_more(wasm_exec_env_t e, uint32_t off, uint32_t len) {
+  const char *s = mem(e, off, len);
+  if (!s || !g_buffered) return;  // только после mw_reply
+  if (!rbuf_add(s, len)) wasm_runtime_set_exception(wasm_runtime_get_module_inst(e), "reply too long");
+}
+
+static int32_t n_blob_size(wasm_exec_env_t e) {
+  (void)e;
+  return g_blob_on ? (int32_t)g_blob_len : -1;
+}
+
+static int32_t n_blob_read(wasm_exec_env_t e, uint32_t off, uint32_t dst, uint32_t len) {
+  if (!g_blob_on || off > g_blob_len) return -1;
+  if (len > g_blob_len - off) len = g_blob_len - off;
+  void *d = mem(e, dst, len);
+  if (!d) return -1;
+  memcpy(d, g_blob + off, len);
+  return (int32_t)len;
+}
+
+// SHA-256 (dbl — двойной) от склейки n кусков блока: пары u32 (смещение, длина). Нужно,
+// например, для txid предыдущей транзакции без witness — хешировать в wasm долго.
+static int32_t n_blob_sha256(wasm_exec_env_t e, uint32_t ranges, uint32_t n, uint32_t dbl, uint32_t out) {
+  if (!g_blob_on || n < 1 || n > 64) return -1;
+  const uint8_t *r = mem(e, ranges, n * 8);
+  uint8_t *o = mem(e, out, 32);
+  if (!r || !o) return -1;
+  SHA256_CTX c;
+  sha256_Init(&c);
+  for (uint32_t i = 0; i < n; i++) {
+    uint32_t off, len;
+    memcpy(&off, r + 8 * i, 4);  // память модуля — little-endian, как и обе платформы
+    memcpy(&len, r + 8 * i + 4, 4);
+    if (off > g_blob_len || len > g_blob_len - off) return -1;
+    sha256_Update(&c, g_blob + off, len);
+  }
+  sha256_Final(&c, o);
+  if (dbl) sha256_Raw(o, 32, o);
+  return 0;
 }
 
 static void n_fail(wasm_exec_env_t e, uint32_t off, uint32_t len) {
@@ -526,6 +643,10 @@ static NativeSymbol g_natives[] = {
     {"ui_warn", n_warn, "(iiii)", NULL},
     {"ui_confirm", n_confirm, "(ii)i", NULL},
     {"ui_address", n_address, "(iiii)i", NULL},
+    {"reply_more", n_reply_more, "(ii)", NULL},
+    {"blob_size", n_blob_size, "()i", NULL},
+    {"blob_read", n_blob_read, "(iii)i", NULL},
+    {"blob_sha256", n_blob_sha256, "(iiii)i", NULL},
 };
 
 // Память движка. Свой распределитель вместо системного: os_realloc в порте WAMR для
@@ -645,16 +766,23 @@ static void run_here(const mwapp_t *a, const char *cmd, app_reply_fn out) {
   argv[0] = (uint32_t)len;
   if (!wasm_runtime_call_wasm(env, fcmd, 1, argv)) {
     const char *x = wasm_runtime_get_exception(inst);
+    if (g_buffered) {  // ответило, а потом упало — такой ответ не отдаём
+      rbuf_reset();
+      g_replied = g_ok = false;
+    }
     out_text("err app crashed: ", x ? x : "?", x ? strlen(x) : 1);
     if (x && strstr(x, "instruction limit")) {  // зациклилось или считает слишком долго
       ux_flash(ICON_WARN, "App stopped", "took too long", 1500);
       menu_draw();
     }
+  } else if (g_buffered) {
+    reply_flush();
   } else {
     out_text("err ", "app gave no answer", 18);  // ничего не ответило (иначе g_replied)
   }
 
 done:
+  rbuf_reset();
   if (env) wasm_runtime_destroy_exec_env(env);
   if (inst) wasm_runtime_deinstantiate(inst);
   if (m) wasm_runtime_unload(m);
@@ -769,6 +897,73 @@ static long unb64(const char *s, uint8_t *out, size_t max) {
     }
   }
   return (long)o;
+}
+
+static void b64enc(const uint8_t *in, size_t n, char *out) {
+  static const char T[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  size_t o = 0;
+  for (size_t i = 0; i < n; i += 3) {
+    uint32_t x = (uint32_t)in[i] << 16 | (i + 1 < n ? (uint32_t)in[i + 1] << 8 : 0) | (i + 2 < n ? in[i + 2] : 0);
+    out[o++] = T[x >> 18 & 63];
+    out[o++] = T[x >> 12 & 63];
+    out[o++] = i + 1 < n ? T[x >> 6 & 63] : '=';
+    out[o++] = i + 2 < n ? T[x & 63] : '=';
+  }
+  out[o] = 0;
+}
+
+// app put <размер> <sha256> | app put b64 <…> | app put end — блок для вызова «… @»
+static void put_line(char *args, app_reply_fn reply) {
+  char *a1 = strtok(args, " "), *a2 = strtok(NULL, " ");
+  if (a1 && !strcmp(a1, "b64")) {
+    static uint8_t buf[2048];
+    long n = unb64(a2, buf, sizeof buf);
+    if (!g_blob || g_blob_ready || n <= 0 || g_blob_got + n > g_blob_len) {
+      blob_reset();
+      reply("err bad chunk");
+    } else {
+      memcpy(g_blob + g_blob_got, buf, n);
+      g_blob_got += n;
+      reply("ok");
+    }
+  } else if (a1 && !strcmp(a1, "end")) {
+    uint8_t sha[32];
+    if (g_blob && g_blob_got == g_blob_len) sha256_Raw(g_blob, g_blob_len, sha);
+    if (!g_blob || g_blob_got != g_blob_len || memcmp(sha, g_blob_sha, 32)) {
+      blob_reset();
+      reply("err data incomplete or sha256 mismatch");
+    } else {
+      g_blob_ready = true;
+      reply("ok");
+    }
+  } else {
+    char *e;
+    unsigned long size = a1 ? strtoul(a1, &e, 10) : 0;
+    blob_reset();
+    if (!size || *e || size > BLOB_MAX || !a2 || strlen(a2) != 64 || unhex_n(a2, g_blob_sha, 32) != 32) {
+      reply("err usage: app put <size up to 524288> <sha256>");
+    } else if (!(g_blob = malloc(size))) {
+      reply("err out of memory");
+    } else {
+      g_blob_len = size;
+      reply("ok");
+    }
+  }
+}
+
+// app get <смещение> — кусок длинного ответа (до 2048 байт, base64)
+static void get_line(const char *arg, app_reply_fn reply) {
+  static char out[8 + 2732];
+  char *e;
+  unsigned long off = strtoul(arg, &e, 10);
+  if (!g_big || *e || off > g_big_len) {
+    reply("err no such data");
+    return;
+  }
+  uint32_t n = g_big_len - off < 2048 ? g_big_len - off : 2048;
+  memcpy(out, "ok ", 3);
+  b64enc((const uint8_t *)g_big + off, n, out + 3);
+  reply(out);
 }
 
 static void add_end(app_reply_fn reply) {
@@ -906,6 +1101,14 @@ bool apps_line(char *line, app_reply_fn reply) {
     }
     return true;
   }
+  if (!strncmp(rest, "put ", 4)) {
+    put_line(rest + 4, reply);
+    return true;
+  }
+  if (!strncmp(rest, "get ", 4)) {
+    get_line(rest + 4, reply);
+    return true;
+  }
   if (!wallet_is_unlocked()) {
     reply("err no wallet on device");
     return true;
@@ -923,6 +1126,18 @@ bool apps_line(char *line, app_reply_fn reply) {
     reply("err no such app");
     return true;
   }
-  run(a, sp ? sp + 1 : "", reply);
+  // « @» в конце — вызову отдаётся загруженный блок; он одноразовый
+  const char *cmd = sp ? sp + 1 : "";
+  size_t cl = strlen(cmd);
+  bool at = !strcmp(cmd, "@") || (cl >= 2 && !strcmp(cmd + cl - 2, " @"));
+  if (at && !g_blob_ready) {
+    reply("err no data: send it with app put first");
+    return true;
+  }
+  big_reset();  // прошлый длинный ответ больше не нужен
+  g_blob_on = at;
+  run(a, cmd, reply);
+  g_blob_on = false;
+  if (at) blob_reset();
   return true;
 }

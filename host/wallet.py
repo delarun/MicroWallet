@@ -134,6 +134,34 @@ def parse_reply(resp):
     raise DeviceError(resp[4:] if resp.startswith("err ") else resp or "нет ответа")
 
 
+CHUNK = 2048  # байт в одной строке app put b64 / app get
+
+
+def app_call(dev, cmd, blob=None):
+    """Команда приложению на устройстве (USB или BLE: у обоих один call()).
+    blob — большой вход: уходит заранее блоком (app put), к команде добавляется « @».
+    Ответ длиннее строки устройство отдаёт как «@<размер> <sha256>» — забираем кусками."""
+    if blob is not None:
+        dev.call(f"app put {len(blob)} {hashlib.sha256(blob).hexdigest()}")
+        for off in range(0, len(blob), CHUNK):
+            dev.call("app put b64 " + base64.b64encode(blob[off:off + CHUNK]).decode())
+        dev.call("app put end")
+        cmd += " @"
+    r = dev.call(cmd)
+    if not r.startswith("@"):
+        return r
+    size, sha = r[1:].split()
+    data = b""
+    while len(data) < int(size):
+        part = base64.b64decode(dev.call(f"app get {len(data)}"))
+        if not part:
+            break
+        data += part
+    if len(data) != int(size) or hashlib.sha256(data).hexdigest() != sha:
+        raise DeviceError("длинный ответ пришёл повреждённым")
+    return data.decode()
+
+
 class Device:
     def __init__(self, port=None):
         if port is None:
