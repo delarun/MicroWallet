@@ -1,7 +1,9 @@
 package io.microwallet.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +45,8 @@ import io.microwallet.app.core.PRL_COINBASE_MATURITY
 import io.microwallet.app.core.assetsFor
 import io.microwallet.app.core.coinInfo
 import io.microwallet.app.core.fmtUnits
+import io.microwallet.app.core.tokensFor
+import io.microwallet.app.core.nativeAsset
 import io.microwallet.app.core.shortAddr
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -78,6 +82,13 @@ fun OverviewScreen(vm: AppViewModel) {
             // подсказка — сверху, там, где жест и начинается
             item { ScreenTitle("Обзор", "Балансы всех сетей · потяни вниз, чтобы обновить") }
             items(coins) { c -> ChainCard(vm, c, w.net) }
+            item {
+                Text(
+                    "Удерживай токен, чтобы убрать его с главной. Вернуть и включить другие — Устройство → Токены на главной",
+                    color = C.faint, fontSize = 12.sp, lineHeight = 17.sp,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                )
+            }
         }
     }
 }
@@ -135,9 +146,9 @@ private fun ChainCard(vm: AppViewModel, coin: String, net: String) {
         }
         Spacer(Modifier.height(14.dp))
         when (state) {
-            null, Load.Loading -> repeat(info.assetsFor(net).size) { SkeletonRow() }
+            null, Load.Loading -> repeat(info.assetsFor(net).count { it.first == nativeAsset(coin) || vm.tokenShown(coin, it.first) }) { SkeletonRow() }
             is Load.Err -> Text(state.msg, color = C.bad, fontSize = 14.sp)
-            is Load.Ok -> Assets(coin, state.v)
+            is Load.Ok -> Assets(vm, coin, state.v)
         }
         Spacer(Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -153,18 +164,27 @@ private fun ChainCard(vm: AppViewModel, coin: String, net: String) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun Assets(coin: String, b: Balance) {
+private fun Assets(vm: AppViewModel, coin: String, b: Balance) {
+    val catalog = coinInfo(coin).tokensFor(vm.wallet?.net ?: "testnet")
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        for (a in b.assets) Row(
+        // токен из каталога убран, пока баланс грузился — не показываем
+        for (a in b.assets.filter { it.id !in catalog || vm.tokenShown(coin, it.id) }) Row(
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(14.dp))
                 .background(C.card2)
+                .combinedClickable(onClick = {}, onLongClick = {
+                    if (a.id in catalog) {  // токен — убрать с главной; монету сети — нельзя
+                        vm.setTokenShown(coin, a.id, false)
+                        vm.message = "${a.symbol} убран с главной — вернуть: Устройство → Токены на главной"
+                    }
+                })
                 .padding(horizontal = 12.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val token = a.id == "usdt" || a.id == "usdc"
+            val token = a.id != nativeAsset(coin) && !a.id.startsWith("trc10:")
             CoinIcon(if (token) a.id else coin, 26.dp)
             Spacer(Modifier.width(10.dp))
             Text(

@@ -28,6 +28,9 @@ import io.microwallet.app.core.findAppUpdate
 import io.microwallet.app.core.Wallet
 import io.microwallet.app.core.WalletApi
 import io.microwallet.app.core.WalletError
+import io.microwallet.app.core.DEFAULT_SHOWN_TOKENS
+import io.microwallet.app.core.coinInfo
+import io.microwallet.app.core.tokensFor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -491,10 +494,32 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
         }, {})
         if (!w.ready) return
-        for (c in COINS.map { it.id }.filter { it in w.coins }) {
-            balances[c] = Load.Loading
-            run({ w.balance(c) }, { if (wallet === w) balances[c] = Load.Ok(it) }, { if (wallet === w) balances[c] = Load.Err(it) })
-        }
+        for (c in COINS.map { it.id }.filter { it in w.coins }) loadBalance(c)
+    }
+
+    private fun loadBalance(c: String) {
+        val w = wallet ?: return
+        val skip = hiddenTokens(c)
+        balances[c] = Load.Loading
+        run({ w.balance(c, skip) }, { if (wallet === w) balances[c] = Load.Ok(it) }, { if (wallet === w) balances[c] = Load.Err(it) })
+    }
+
+    // ---------------- токены на главной ----------------
+
+    /** Какие токены показывать на главной («монета:токен»). Скрытые не запрашиваются. */
+    var shownTokens by mutableStateOf(prefs.getStringSet("shown_tokens", null)?.toSet() ?: DEFAULT_SHOWN_TOKENS)
+        private set
+
+    fun tokenShown(coin: String, asset: String) = "$coin:$asset" in shownTokens
+
+    /** Токены монеты, убранные с главной. */
+    fun hiddenTokens(coin: String): Set<String> =
+        coinInfo(coin).tokensFor(wallet?.net ?: "testnet").filter { !tokenShown(coin, it) }.toSet()
+
+    fun setTokenShown(coin: String, asset: String, show: Boolean) {
+        shownTokens = if (show) shownTokens + "$coin:$asset" else shownTokens - "$coin:$asset"
+        prefs.edit().putStringSet("shown_tokens", shownTokens).apply()
+        if (wallet?.ready == true && coin in coins) loadBalance(coin)
     }
 
     /** Настройка устройства «Addresses»: сколько адресов для получения (1, 5, 10, 20). */

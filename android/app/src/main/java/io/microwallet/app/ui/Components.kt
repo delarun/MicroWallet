@@ -412,6 +412,11 @@ fun CoinIcon(kind: String, size: Dp, modifier: Modifier = Modifier) {
                         drawRect(white, Offset(18 * s, 10 * s), Size(4 * s, 20 * s))
                         drawOval(white, Offset(9 * s, 16 * s), Size(22 * s, 6 * s), style = Stroke(2 * s))
                     }
+                    else -> {  // остальные токены: цвет и первая буква символа
+                        val ch = kind.removePrefix("trc10:").take(1).uppercase()
+                        val t = measurer.measure(ch, TextStyle(fontSize = (18 * s).toSp(), fontWeight = FontWeight.Bold, color = white))
+                        drawText(t, topLeft = Offset(c.x - t.size.width / 2f, c.y - t.size.height / 2f))
+                    }
                 }
             }
         }

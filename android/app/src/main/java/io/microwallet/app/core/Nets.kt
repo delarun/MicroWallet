@@ -73,8 +73,14 @@ val NETS = mapOf(
         ethChain = 1,
         eth = "ETH",
         ethTokens = listOf(
+            // как белый список приложения eth (apps/eth/eth.c), адреса сверены с сетью
             EvmToken("usdt", "USDT", "0xdAC17F958D2ee523a2206206994597C13D831ec7", 6),
             EvmToken("usdc", "USDC", "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", 6),
+            EvmToken("dai", "DAI", "0x6B175474E89094C44Da98b954EedeAC495271d0F", 18),
+            EvmToken("usde", "USDe", "0x4c9EDD5852cd905f086C759E8383e09bff1E68B3", 18),
+            EvmToken("pyusd", "PYUSD", "0x6c3ea9036406852006290770BEdFcAbA0e23A0e8", 6),
+            EvmToken("shib", "SHIB", "0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE", 18),
+            EvmToken("pepe", "PEPE", "0x6982508145454Ce325dDbE47a25d4ec3d2311933", 18),
         ),
         tonApi = "https://toncenter.com/api",
         tonTxUrl = "https://tonviewer.com/transaction/",
@@ -83,7 +89,7 @@ val NETS = mapOf(
     ),
 )
 
-fun NetConfig.symbol(asset: String): String = when (asset) {
+fun NetConfig.symbol(asset: String): String = ethTokens.firstOrNull { it.asset == asset }?.symbol ?: when (asset) {
     "usdt" -> "USDT"
     "usdc" -> "USDC"
     "trx" -> "TRX"
@@ -118,6 +124,20 @@ val COINS = listOf(
 )
 
 fun coinInfo(id: String): CoinInfo = COINS.first { it.id == id }
+
+/** Монета самой сети — её с главной не убрать. */
+fun nativeAsset(coin: String) = when (coin) {
+    "tron" -> "trx"
+    "bsc" -> "bnb"
+    "ton" -> "gram"
+    else -> coin
+}
+
+/** Токены монеты в сети: их можно убрать с главной (и не запрашивать баланс). */
+fun CoinInfo.tokensFor(net: String): List<String> = assetsFor(net).map { it.first }.filter { it != nativeAsset(id) }
+
+/** На главной по умолчанию («монета:токен»); новые токены — выключены, пока их не включат. */
+val DEFAULT_SHOWN_TOKENS = setOf("tron:usdt", "bsc:usdt", "eth:usdt", "eth:usdc", "ton:usdt")
 
 const val CHANGE_MAX = 20    // адреса сдачи идут подряд: проверяем до первого пустого, не дальше
 const val SCAN_TTL_MS = 30_000L  // баланс BTC/PRL не чаще раза в 30 с (mempool.space отвечает 429)

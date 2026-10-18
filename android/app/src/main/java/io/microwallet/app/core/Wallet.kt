@@ -74,7 +74,8 @@ interface WalletApi {
     fun symbol(asset: String): String = cfg.symbol(asset)
     fun address(coin: String, index: Int = 0, chain: Int = 0): String
     fun showAddress(coin: String, index: Int = 0): String
-    fun balance(coin: String): Balance
+    /** skip — токены, баланс которых не запрашивать (убраны с главной). */
+    fun balance(coin: String, skip: Set<String> = emptySet()): Balance
     fun feeLevels(coin: String): Map<String, BigDecimal>
     fun prepareSend(req: SendRequest): Draft
     fun signAndSend(d: Draft, broadcast: Boolean = true): SendResult {
@@ -470,7 +471,7 @@ class Wallet(
 
     // ---- баланс ----
 
-    override fun balance(coin: String): Balance {
+    override fun balance(coin: String, skip: Set<String>): Balance {
         need(coin)
         if (coin == "btc" || coin == "prl") {
             val s = scan(coin)
@@ -482,7 +483,7 @@ class Wallet(
             )
         }
         val addr = address(coin, 0)
-        if (coin == "ton") return tonBalance(addr)
+        if (coin == "ton") return tonBalance(addr, skip)
         if (coin == "tron") {
             val acc = tronPost("/wallet/getaccount", JSONObject().put("address", addr).put("visible", true)) as JSONObject
             val notes = if (acc.length() == 0) listOf("Аккаунт не активирован: нужно получить хотя бы 1 TRX") else emptyList()
@@ -490,8 +491,8 @@ class Wallet(
             val trc10 = (0 until v2.length()).map { v2.getJSONObject(it) }.filter { it.optLong("value") > 0 }
                 .map { Asset("trc10:" + it.getString("key"), "#" + it.getString("key"), 0, BigInteger.valueOf(it.getLong("value"))) }
             return Balance(
-                addr, listOf(
-                    Asset("usdt", "USDT", 6, tronUsdt(addr)),
+                addr, listOfNotNull(
+                    if ("usdt" in skip) null else Asset("usdt", "USDT", 6, tronUsdt(addr)),
                     Asset("trx", "TRX", 6, BigInteger.valueOf(acc.optLong("balance", 0))),
                 ) + trc10, notes = notes
             )
@@ -500,7 +501,7 @@ class Wallet(
         val bal = hexInt(rpc(chain, "eth_getBalance", addr, "latest"))
         return Balance(
             addr,
-            chain.tokens.map { Asset(it.asset, it.symbol, it.decimals, tokenBalance(chain, it, addr)) } +
+            chain.tokens.filter { it.asset !in skip }.map { Asset(it.asset, it.symbol, it.decimals, tokenBalance(chain, it, addr)) } +
                 Asset(if (coin == "eth") "eth" else "bnb", chain.native, 18, bal),
         )
     }
@@ -711,10 +712,10 @@ class Wallet(
         return if (w != null && w.length() > 0) BigInteger(w.getJSONObject(0).getString("balance")) else BigInteger.ZERO
     }
 
-    private fun tonBalance(addr: String): Balance {
+    private fun tonBalance(addr: String, skip: Set<String>): Balance {
         val (bal, active, _) = tonInfo(addr)
         val assets = ArrayList<Asset>()
-        if (cfg.tonUsdt != null) assets += Asset("usdt", "USDT", 6, tonUsdt(addr))
+        if (cfg.tonUsdt != null && "usdt" !in skip) assets += Asset("usdt", "USDT", 6, tonUsdt(addr))
         assets += Asset("gram", symbol("gram"), 9, bal)
         return Balance(addr, assets, notes = if (active) emptyList() else listOf("Кошелёк ещё не развёрнут: первая отправка развернёт его"))
     }

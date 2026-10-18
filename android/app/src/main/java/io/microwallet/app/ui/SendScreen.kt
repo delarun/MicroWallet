@@ -60,6 +60,7 @@ import io.microwallet.app.core.WalletError
 import io.microwallet.app.core.addressToScript
 import io.microwallet.app.core.TRON_MEMO_MAX
 import io.microwallet.app.core.assetsFor
+import io.microwallet.app.core.nativeAsset
 import io.microwallet.app.core.coinInfo
 import io.microwallet.app.core.evmDecode
 import io.microwallet.app.core.fmtUnits
@@ -211,7 +212,10 @@ private fun SendForm(vm: AppViewModel) {
         // TRC10 — те, что есть на балансе (их ID знает только нода)
         val trc10 = if (s.coin != "tron") emptyList() else (vm.balances["tron"] as? Load.Ok)?.v?.assets
             ?.map { it.id }?.filter { it.startsWith("trc10:") }.orEmpty().take(2)
-        val assets = coinInfo(s.coin).assetsFor(w.net).map { it.first } + trc10
+        // токены, убранные с главной, здесь тоже не предлагаем (их баланс неизвестен)
+        val assets = coinInfo(s.coin).assetsFor(w.net).map { it.first }
+            .filter { it == nativeAsset(s.coin) || vm.tokenShown(s.coin, it) } + trc10
+        LaunchedEffect(assets) { if (s.asset !in assets) s.asset = assets.first() }
         if (assets.size > 1) {
             FieldLabel("Актив")
             Segmented(assets.map { it to w.symbol(it) }, s.asset, { s.asset = it }, Modifier.fillMaxWidth())

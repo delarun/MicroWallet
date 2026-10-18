@@ -170,7 +170,14 @@ def main():
         tx = W.rlp([8, 3 * 10**9, 60000, bytes.fromhex(usdc), 0, data, chain, 0, 0])
         r = sim.call(f"app eth sign 1 {tx.hex()}")
         assert r.startswith("ok ") and recover_address(W.keccak256(tx), bytes.fromhex(r[3:])) == sim.call("app eth addr 1")[3:], r
-        print("4. подпись USDC 12.5: ok")
+        if chain == 1:  # остальной белый список mainnet: каждый токен подписывается
+            for sym, c in (("USDT", "dAC17F958D2ee523a2206206994597C13D831ec7"), ("DAI", "6B175474E89094C44Da98b954EedeAC495271d0F"),
+                           ("USDe", "4c9EDD5852cd905f086C759E8383e09bff1E68B3"), ("PYUSD", "6c3ea9036406852006290770BEdFcAbA0e23A0e8"),
+                           ("SHIB", "95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE"), ("PEPE", "6982508145454Ce325dDbE47a25d4ec3d2311933")):
+                tx = W.rlp([9, 3 * 10**9, 60000, bytes.fromhex(c), 0, data, chain, 0, 0])
+                r = sim.call(f"app eth sign 1 {tx.hex()}")
+                assert r.startswith("ok ") and recover_address(W.keccak256(tx), bytes.fromhex(r[3:])) == sim.call("app eth addr 1")[3:], (sym, r)
+        print("4. подпись USDC 12.5" + (" и USDT, DAI, USDe, PYUSD, SHIB, PEPE" if chain == 1 else "") + ": ok")
         ok += 1
 
         # ---- EIP-1559 (тип 2): 0x02 || rlp([chainId, nonce, tip, maxFee, gas, to, value, data, []]) ----

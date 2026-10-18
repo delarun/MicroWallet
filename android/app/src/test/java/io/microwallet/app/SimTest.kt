@@ -179,6 +179,20 @@ class SimTest {
         dev.close()
     }
 
+    /** Токен, убранный с главной, не запрашивается: сеть знает только баланс TRX. */
+    @Test
+    fun hiddenTokens() {
+        val dev = LineDevice(Sim.start("lines", Sim.newDir()))
+        dev.call("restore " + "00".repeat(16))
+        Wallet(dev, FakeHttp(JSONObject()), Sim.words).let { s -> for (f in Sim.apps) s.installApp(inspectApp(f.readBytes())) { _, _ -> } }
+        val http = FakeHttp(JSONObject().put("POST https://nile.trongrid.io/wallet/getaccount", JSONObject().put("balance", 5_000_000)))
+        val w = Wallet(dev, http, Sim.words)
+        val b = w.balance("tron", setOf("usdt"))
+        assertEquals(listOf("trx"), b.assets.map { it.id })
+        assertThrows(AssertionError::class.java) { w.balance("tron") }  // без skip пошёл бы запрос USDT
+        dev.close()
+    }
+
     @Test
     fun vectors() {
         val dir = Sim.newDir()

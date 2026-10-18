@@ -164,6 +164,10 @@ fun DeviceScreen(vm: AppViewModel) {
             PearlCard(vm)
             Spacer(Modifier.height(14.dp))
         }
+        if (w.ready && !vm.isDemo) {
+            TokensCard(vm)
+            Spacer(Modifier.height(14.dp))
+        }
         AppUpdateCard(vm)
         Spacer(Modifier.height(14.dp))
         Card {

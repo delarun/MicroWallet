@@ -42,6 +42,11 @@ val COIN_COLORS = mapOf(
     "usdc" to Color(0xFF2775CA),
     "eth" to Color(0xFF627EEA),
     "ton" to Color(0xFF0098EA),
+    "dai" to Color(0xFFF5AC37),
+    "usde" to Color(0xFF3A3A44),
+    "pyusd" to Color(0xFF0070E0),
+    "shib" to Color(0xFFE42D04),
+    "pepe" to Color(0xFF4C9540),
 )
 
 val Mono = FontFamily.Monospace
