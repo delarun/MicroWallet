@@ -12,4 +12,6 @@ endif()
 # Движок WebAssembly для приложений (get_deps.sh скачивает его в lib/)
 set(EXTRA_COMPONENT_DIRS ${CMAKE_CURRENT_LIST_DIR}/../lib/wasm-micro-runtime/build-scripts/esp-idf)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+# Лимит инструкций приложений (src/apps.c): в Kconfig компонента WAMR такой опции нет
+idf_build_set_property(COMPILE_DEFINITIONS "WASM_ENABLE_INSTRUCTION_METERING=1" APPEND)
 project(microwallet)

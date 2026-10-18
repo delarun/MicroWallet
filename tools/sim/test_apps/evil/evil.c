@@ -1,6 +1,7 @@
 // Тестовое приложение: проверяет, что песочница не даёт лишнего.
 // Команды: steal (ключ чужого пути), sign (подпись без подтверждения),
-//          oob (указатель за пределы памяти), twice (ответ два раза), trap, own
+//          oob (указатель за пределы памяти), twice (ответ два раза), trap, own,
+//          loop (бесконечный цикл), loopcall (бесконечный цикл с вызовами прошивки)
 #include "mw.h"
 
 void mw_main(const char *cmd, size_t len) {
@@ -27,6 +28,11 @@ void mw_main(const char *cmd, size_t len) {
     mw_ok(mw_sr25519_pubkey(h, 0, out) == -2 ? "denied" : "LEAK");
   } else if (!memcmp(cmd, "trap", 4)) {
     __builtin_trap();
+  } else if (!memcmp(cmd, "loopcall", 8)) {
+    for (volatile int i = 0;; i++) mw_net();
+  } else if (!memcmp(cmd, "loop", 4)) {
+    for (volatile int i = 0;; i++) {
+    }
   } else {
     mw_ok("hello");
   }

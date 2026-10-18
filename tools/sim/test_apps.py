@@ -8,6 +8,7 @@
 import base64
 import hashlib
 import os
+import select
 import subprocess
 import sys
 import tempfile
@@ -68,9 +69,13 @@ class Sim:
         self.p = subprocess.Popen([binary, "lines"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   stderr=subprocess.DEVNULL, text=True, env=env)
 
-    def call(self, line):
+    def call(self, line, timeout=60):
         self.p.stdin.write(line + "\n")
         self.p.stdin.flush()
+        # без таймаута регресс (зависшее приложение) повесил бы и сам тест
+        if not select.select([self.p.stdout], [], [], timeout)[0]:
+            self.p.kill()
+            raise TimeoutError(f"нет ответа за {timeout} с на: {line[:60]}")
         return self.p.stdout.readline().strip()
 
     def close(self):
@@ -169,8 +174,11 @@ def main():
         assert r.startswith("err app crashed"), r
         r = sim.call("app evil trap")
         assert r.startswith("err app crashed"), r
+        for c in ("loop", "loopcall"):  # бесконечный цикл — останавливается по лимиту инструкций
+            r = sim.call(f"app evil {c}", timeout=30)
+            assert r.startswith("err app crashed") and "instruction limit" in r, (c, r)
         assert sim.call("app evil hello") == "ok hello"  # после сбоя всё живо
-        print("6. песочница: чужой ключ, подпись без «Accept», выход за память, trap — не проходят")
+        print("6. песочница: чужой ключ, подпись без «Accept», выход за память, trap, вечный цикл — не проходят")
         ok += 1
 
         # ---- обновление, удаление ----

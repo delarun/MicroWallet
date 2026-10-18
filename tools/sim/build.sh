@@ -6,7 +6,7 @@ TC=lib/trezor-crypto
 WAMR=lib/wasm-micro-runtime
 OUT=${1:-mwsim}
 # Движок WebAssembly (WAMR) — статической библиотекой, один раз
-if [ ! -f build/sim-wamr/libvmlib.a ]; then
+if [ ! -f build/sim-wamr/libvmlib.a ] || [ tools/sim/wamr/CMakeLists.txt -nt build/sim-wamr/libvmlib.a ]; then
   cmake -S tools/sim/wamr -B build/sim-wamr -DCMAKE_BUILD_TYPE=Release >/dev/null
   cmake --build build/sim-wamr -j >/dev/null
 fi

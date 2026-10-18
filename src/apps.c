@@ -27,6 +27,10 @@
 #define MAX_APPS 64  // в RAM — список с манифестами (~150 байт на приложение)
 #define BUF_SIZE 4096  // буфер команды в памяти модуля (mw_buf)
 #define WASM_STACK (8 * 1024)  // стек интерпретатора (операнды и кадры)
+// Бюджет инструкций на один вызов приложения: бесконечный цикл не подвесит устройство.
+// Считаются только инструкции WebAssembly — ожидание кнопки и подписи в прошивке не в счёт.
+// Замер в симуляторе: подпись Pearl с 16 входами ~2.6 млн, BTC 16 входов ~1.5 млн, адрес — тысячи.
+#define APP_MAX_INSTR 50000000
 
 // Раздел apps: приложения подряд, каждое — с границы сектора (4 КБ): заголовок 512 байт
 // (tools/mkapps.py пишет такой же) + модуль. Свободное место — стёртые секторы.
@@ -570,6 +574,14 @@ static bool runtime_init(void) {
   return ready;
 }
 
+static int instr_limit(void) {
+#ifdef MW_SIM
+  const char *e = getenv("MW_SIM_INSTR");  // для замеров: сколько нужно легальным командам
+  if (e) return atoi(e);
+#endif
+  return APP_MAX_INSTR;
+}
+
 static void run_here(const mwapp_t *a, const char *cmd, app_reply_fn out) {
   static slot_hdr_t h;
   char err[128];
@@ -615,6 +627,7 @@ static void run_here(const mwapp_t *a, const char *cmd, app_reply_fn out) {
     out_text("err app load: ", err, strlen(err));
     goto done;
   }
+  wasm_runtime_set_instruction_count_limit(env, instr_limit());
   wasm_function_inst_t fbuf = wasm_runtime_lookup_function(inst, "mw_buf");
   wasm_function_inst_t fcmd = wasm_runtime_lookup_function(inst, "mw_cmd");
   uint32_t argv[1] = {0};
@@ -633,6 +646,10 @@ static void run_here(const mwapp_t *a, const char *cmd, app_reply_fn out) {
   if (!wasm_runtime_call_wasm(env, fcmd, 1, argv)) {
     const char *x = wasm_runtime_get_exception(inst);
     out_text("err app crashed: ", x ? x : "?", x ? strlen(x) : 1);
+    if (x && strstr(x, "instruction limit")) {  // зациклилось или считает слишком долго
+      ux_flash(ICON_WARN, "App stopped", "took too long", 1500);
+      menu_draw();
+    }
   } else {
     out_text("err ", "app gave no answer", 18);  // ничего не ответило (иначе g_replied)
   }
