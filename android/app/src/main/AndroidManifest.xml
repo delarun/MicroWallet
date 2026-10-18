@@ -6,6 +6,8 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Обновление самого приложения из релизов GitHub (PackageInstaller) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Android 12+: поиск и подключение без доступа к геопозиции -->
     <uses-permission
         android:name="android.permission.BLUETOOTH_SCAN"
@@ -37,6 +39,8 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Итог установки обновления приложения (AppInstaller) -->
+        <receiver android:name=".ui.InstallReceiver" android:exported="false" />
         <!-- Сканер QR из zxing-android-embedded: только портретная ориентация -->
         <activity
             android:name="com.journeyapps.barcodescanner.CaptureActivity"

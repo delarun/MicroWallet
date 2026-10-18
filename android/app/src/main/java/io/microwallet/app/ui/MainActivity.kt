@@ -91,18 +91,21 @@ fun App(vm: AppViewModel) {
         topBar = { if (w != null) TopBar(vm) },
         bottomBar = { if (w != null && !vm.showRestore && !vm.showFirmware && !vm.showApps) BottomBar(vm) },
     ) { pad ->
-        Box(Modifier.fillMaxSize().padding(pad)) {
-            when {
-                w == null -> ConnectScreen(vm)
-                vm.showRestore -> RestoreScreen(vm)
-                vm.showFirmware -> FirmwareScreen(vm)
-                vm.showApps -> AppsScreen(vm)
-                else -> AnimatedContent(vm.tab, label = "tab", transitionSpec = { fadeIn() togetherWith fadeOut() }) { t ->
-                    when (t) {
-                        Tab.Overview -> OverviewScreen(vm)
-                        Tab.Receive -> ReceiveScreen(vm)
-                        Tab.Send -> SendScreen(vm)
-                        Tab.Device -> DeviceScreen(vm)
+        Column(Modifier.fillMaxSize().padding(pad)) {
+            AppUpdateBanner(vm)
+            Box(Modifier.fillMaxWidth().weight(1f)) {
+                when {
+                    w == null -> ConnectScreen(vm)
+                    vm.showRestore -> RestoreScreen(vm)
+                    vm.showFirmware -> FirmwareScreen(vm)
+                    vm.showApps -> AppsScreen(vm)
+                    else -> AnimatedContent(vm.tab, label = "tab", transitionSpec = { fadeIn() togetherWith fadeOut() }) { t ->
+                        when (t) {
+                            Tab.Overview -> OverviewScreen(vm)
+                            Tab.Receive -> ReceiveScreen(vm)
+                            Tab.Send -> SendScreen(vm)
+                            Tab.Device -> DeviceScreen(vm)
+                        }
                     }
                 }
             }

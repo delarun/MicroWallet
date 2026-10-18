@@ -19,7 +19,10 @@ import io.microwallet.app.core.COINS
 import io.microwallet.app.core.DEFAULT_REPO
 import io.microwallet.app.core.DemoWallet
 import io.microwallet.app.core.DeviceError
+import io.microwallet.app.core.AppUpdate
 import io.microwallet.app.core.UrlHttp
+import io.microwallet.app.core.downloadAppUpdate
+import io.microwallet.app.core.findAppUpdate
 import io.microwallet.app.core.Wallet
 import io.microwallet.app.core.WalletApi
 import io.microwallet.app.core.WalletError
@@ -483,10 +486,83 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         refresh()
     }
 
+    // ---------------- обновление самого приложения ----------------
+
+    /** Новая версия приложения в релизах (null — нет или ещё не проверяли). */
+    var appUpdate by mutableStateOf<AppUpdate?>(null)
+    /** "" — ничего, "checking", "downloading", "installing", "error" */
+    var appUpdatePhase by mutableStateOf("")
+    var appUpdateProgress by mutableStateOf(0f)
+    var appUpdateError by mutableStateOf<String?>(null)
+    var autoAppUpdate by mutableStateOf(prefs.getBoolean("app_auto_update", true))
+        private set
+    private var foreground = false
+
+    /** versionCode и versionName установленного приложения */
+    val appVersion: Pair<Long, String> = readAppVersion(app)
+
+    private fun readAppVersion(ctx: Application): Pair<Long, String> {
+        val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+        @Suppress("DEPRECATION")
+        val code = if (android.os.Build.VERSION.SDK_INT >= 28) pi.longVersionCode else pi.versionCode.toLong()
+        return code to (pi.versionName ?: "?")
+    }
+
+    fun changeAutoAppUpdate(on: Boolean) {
+        autoAppUpdate = on
+        prefs.edit().putBoolean("app_auto_update", on).apply()
+    }
+
+    /** Источник — тот же, что для прошивок: GitHub-репозиторий или сервер с ПК. */
+    private fun updateSource() = if (fw.source == "pc") fw.pcUrl else fw.repo.ifBlank { DEFAULT_REPO }
+
+    /** Проверить релизы. Сама — не чаще раза в 6 часов; force — по кнопке. */
+    fun checkAppUpdate(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (appUpdatePhase in setOf("checking", "downloading", "installing")) return
+        if (!force && now - prefs.getLong("app_update_checked", 0) < 6 * 3600_000L) return
+        prefs.edit().putLong("app_update_checked", now).apply()
+        appUpdatePhase = "checking"
+        run({ findAppUpdate(UrlHttp(), updateSource(), appVersion.first) }, { u ->
+            appUpdate = u
+            appUpdatePhase = ""
+            when {
+                u == null -> if (force) message = "Установлена последняя версия приложения"
+                // Установка перезапускает приложение — сама только без связи с устройством
+                autoAppUpdate && foreground && wallet == null && conn == Conn.Idle && !busy -> installAppUpdate()
+            }
+        }, {
+            appUpdatePhase = ""
+            if (force) message = it
+        })
+    }
+
+    fun installAppUpdate() {
+        val u = appUpdate ?: return
+        appUpdatePhase = "downloading"
+        appUpdateProgress = 0f
+        appUpdateError = null
+        run({
+            downloadAppUpdate(UrlHttp(), u) { got, total -> if (total > 0) appUpdateProgress = got.toFloat() / total }
+        }, { apk ->
+            appUpdatePhase = "installing"
+            try {
+                AppInstaller.install(getApplication(), apk)
+            } catch (e: Exception) {
+                appUpdatePhase = "error"
+                appUpdateError = e.message ?: "установка не удалась"
+            }
+        }, {
+            appUpdatePhase = "error"
+            appUpdateError = it
+        })
+    }
+
     // ---------------- фон ----------------
 
     /** Свернули приложение: через 2 минуты отключаемся, чтобы устройство могло уснуть. */
     fun onBackground() {
+        foreground = false
         stopScan()
         bgJob?.cancel()
         bgJob = viewModelScope.launch {
@@ -496,7 +572,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun onForeground() {
+        foreground = true
         bgJob?.cancel()
+        checkAppUpdate()
     }
 
     override fun onCleared() {

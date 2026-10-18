@@ -151,6 +151,8 @@ fun DeviceScreen(vm: AppViewModel) {
             }
             Spacer(Modifier.height(14.dp))
         }
+        AppUpdateCard(vm)
+        Spacer(Modifier.height(14.dp))
         Card {
             Text("Связь", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(6.dp))
