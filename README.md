@@ -3,7 +3,7 @@
 Код открыт: https://github.com/delarun/MicroWallet · прошивки, приложения и APK —
 в [релизах](https://github.com/delarun/MicroWallet/releases).
 
-Монеты: **BTC**, **Pearl** (PRL), **TRON** (TRX и USDT-TRC20), **BNB Chain** (BNB и USDT-BEP20),
+Монеты: **BTC**, **Pearl** (PRL), **TRON** (TRX, USDT-TRC20 и TRC10), **BNB Chain** (BNB и USDT-BEP20),
 **Ethereum** (ETH, USDT, USDC). Все они выводятся из одной мнемоники (12, 18 или 24 слова).
 В прошивке — только ключи, экраны и связь; каждая монета — приложение WebAssembly в
 песочнице, которое ставится и обновляется отдельно (как приложения у Ledger).
@@ -248,7 +248,7 @@ SHA-256 ELF; по нему приложение видит, что эта сбо
 |---|---|
 | `btc` (`apps/utxo`) | BIP84 P2WPKH, BIP143; выводы P2WPKH/P2WSH/P2TR, проверка сдачи, xpub |
 | `prl` (`apps/utxo`) | Pearl: BIP86 Taproot, BIP341 + BIP340; выводы P2TR и P2MR |
-| `tron` | TRX и USDT-TRC20: устройство само разбирает protobuf транзакции ноды |
+| `tron` | TRX, USDT-TRC20, TRC10 и memo: устройство само разбирает protobuf транзакции ноды |
 | `bsc` | BNB и USDT-BEP20, legacy EIP-155 |
 | `eth` | ETH, USDT, USDC (Sepolia: USDC), legacy EIP-155, адреса как в MetaMask |
 
@@ -368,7 +368,8 @@ python host/wallet.py btc send tb1q... 10000 --feerate 2 --dry-run
 
 # TRON: USDT-TRC20 (по умолчанию) или TRX
 python host/wallet.py tron send T... 12.5                     # USDT
-python host/wallet.py tron send T... 3 --token trx
+python host/wallet.py tron send T... 3 --token trx --memo "invoice 42"
+python host/wallet.py tron send T... 77 --token trc10:1002000   # TRC10 по ID токена, целые единицы
 
 # BSC: USDT-BEP20 (по умолчанию) или BNB
 python host/wallet.py bsc send 0x... 12.5                     # USDT
@@ -405,7 +406,9 @@ PSBT разбирает хост (`host/psbt.py`, `android/…/core/Psbt.kt`, BI
 показывает её отдельно. Устройство подписывает до 64 входов за раз.
 
 `--dry-run` подписывает транзакцию, но не отправляет её. USDT-TRC20 тратит энергию,
-которая оплачивается сжиганием TRX; новый TRON-адрес нужно активировать (1 TRX).
+которая оплачивается сжиганием TRX; новый TRON-адрес нужно активировать (1 TRX). Сколько TRX
+сгорит, хост оценивает по ноде (энергия перевода, цены сети, застейканные ресурсы); без
+`--fee-limit` лимит — 40 TRX или оценка + 20 %, если она больше. Memo стоит 1 TRX.
 USDT-BEP20 платит газ в BNB. Данные по Pearl — из публичного Blockbook
 (`blockbook.pearlresearch.ai`), для TronGrid можно задать `TRONGRID_API_KEY`.
 
@@ -513,7 +516,7 @@ android/        приложение для Android: core/ (кошелёк, се
 | Монета | Путь | Адрес | Что подписывается |
 |---|---|---|---|
 | BTC | `m/84'/1'/0'/{0,1}/i` (mainnet `84'/0'`) | P2WPKH `tb1q…` | BIP143, только свои P2WPKH-входы; выводы P2WPKH/P2WSH/P2TR |
-| TRON | `m/44'/195'/0'/0/i` | `T…` (как в TronLink) | `sha256(raw_data)`: TransferContract (TRX) или `transfer()` USDT |
+| TRON | `m/44'/195'/0'/0/i` | `T…` (как в TronLink) | `sha256(raw_data)`: TransferContract (TRX), TransferAssetContract (TRC10) или `transfer()` USDT |
 | BSC | `m/44'/60'/0'/0/i` | `0x…` EIP-55 (как в MetaMask) | `keccak256` от legacy-транзакции EIP-155: перевод BNB или `transfer()` USDT |
 | PRL | `m/86'/808276'/0'/{0,1}/i` (testnet `86'/1'`) | Taproot `prl1p…` (как в Pearl Wallet) | BIP341 key-path, подпись Schnorr BIP340; выводы P2TR и P2MR |
 
@@ -524,7 +527,11 @@ android/        приложение для Android: core/ (кошелёк, се
   атака «соврать о сумме входа» (BIP143 подписывает сумму только своего входа) не проходит.
   До 64 входов и 16 получателей; запрос уходит блоком (`sign @`).
 - **TRON.** Транзакцию собирает нода, устройство само разбирает protobuf: отправитель —
-  этот кошелёк, ровно один контракт, неизвестные и повторяющиеся поля — отказ.
+  этот кошелёк, ровно один контракт (TRX, TRC10 или `transfer()` токена из белого списка),
+  неизвестные и повторяющиеся поля — отказ. Memo (до 96 символов, иначе hex до 48 байт) на
+  экране целиком. Для TRC10 точность токена устройству неизвестна — сумма в целых единицах и ID
+  токена. Потолок `fee_limit` проверяемый; рядом — «Fee (est.)», оценка хоста: её устройство
+  проверить не может, но оценку выше потолка отклоняет.
 - **BSC, Ethereum** (общий код `apps/evm/evm.c`). chainId — по сети сборки. Транзакции legacy EIP-155
   и EIP-1559 (тип 2, пустой access list; ETH с телефона — тип 2: maxFee = 2 × baseFee + чаевые), RLP
   только каноничный. Только перевод монеты или `transfer()` токена из белого списка; `approve` и другие
@@ -539,7 +546,7 @@ android/        приложение для Android: core/ (кошелёк, се
 `ping`, `info`, `wipe`, `boot`, `restore <entropy hex>`;
 BTC: `app btc xpub`, `app btc addr|show <chain> <i>`, `app btc sign @` (запрос и предыдущие транзакции блоком; формат — в начале `apps/utxo/utxo.c`);
 PRL: `app prl addr|show <chain> <i>`, `app prl sign @` (или `sign <hex>`, если запрос влезает в строку);
-TRON: `app tron addr|show <i>`, `app tron sign <i> <raw_data hex>`;
+TRON: `app tron addr|show <i>`, `app tron sign <i> <raw_data hex> [оценка комиссии, sun]`;
 BSC и ETH: `app bsc|eth addr|show <i>`, `app bsc|eth sign <i> <rlp hex>`;
 прошивка: `ota begin <size> <sha256>` (или `ota zbegin …` — дальше сжатый zlib-поток, на ~40% меньше данных),
 `ota b64 <base64, до 2048 байт>` (или `ota data <hex>`), `ota end`, `ota abort`; хосты шлют куски конвейером
@@ -561,7 +568,8 @@ BSC и ETH: `app bsc|eth addr|show <i>`, `app bsc|eth sign <i> <rlp hex>`;
    прошивку, полная защита — после перевода в Release.
 2. **Ввод seed на телефоне или ПК** удобен, но устройство ввода видит фразу. Ввода на самом
    устройстве одной кнопкой пока нет.
-3. TRON: на экране `fee_limit`, но не реальная цена энергии; нет мемо и TRC10.
+3. TRON: реальную стоимость (энергия, bandwidth) устройство знает только со слов хоста — проверяем
+   лишь потолок `fee_limit`. Имя и точность TRC10 тоже не проверить: показываются ID и целые единицы.
 4. EVM: nonce и цену газа сообщает хост (устройство их показывает, но проверить не может); BSC с телефона пока
    уходит legacy-транзакцией (тип 2 устройство подписывает, приём сетью BSC не проверен).
 5. Pearl: только key-path Taproot; своих P2MR/XMSS-ключей нет.

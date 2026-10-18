@@ -68,16 +68,9 @@ fun OverviewScreen(vm: AppViewModel) {
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            item { ScreenTitle("Обзор", "Балансы всех сетей на устройстве") }
+            // подсказка — сверху, там, где жест и начинается
+            item { ScreenTitle("Обзор", "Балансы всех сетей · потяни вниз, чтобы обновить") }
             items(coins) { c -> ChainCard(vm, c, w.net) }
-            item {
-                Text(
-                    "Потяни вниз, чтобы обновить",
-                    color = C.faint, fontSize = 12.sp,
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                )
-            }
         }
     }
 }

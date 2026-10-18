@@ -1,18 +1,25 @@
-// TRON для MicroWallet: адреса m/44'/195'/0'/0/i (как в TronLink), перевод TRX и
-// USDT-TRC20. Перенесено из встроенной монеты (src/tron.c до v0.5) без изменений.
+// TRON для MicroWallet: адреса m/44'/195'/0'/0/i (как в TronLink), перевод TRX, TRC10 и
+// USDT-TRC20.
 //
 // Подписывается raw_data, как его собрала нода: устройство само разбирает protobuf.
 // Поддерживается ровно один контракт:
 //   TransferContract (type 1)       — перевод TRX
+//   TransferAssetContract (type 2)  — перевод TRC10 (точность токена устройству неизвестна —
+//                                     показываются целые единицы и ID токена)
 //   TriggerSmartContract (type 31)  — transfer(address,uint256) токена из белого списка
+// Memo (raw_data.data) показывается на экране: текстом или hex.
 // Protobuf допускает повторы полей, поэтому любое неизвестное или повторное поле —
 // ошибка: устройство и нода должны видеть одну и ту же транзакцию.
 //
-// Команды: addr <i> | show <i> | sign <i> <raw_data hex>  -> r || s || recid
+// Команды: addr <i> | show <i> | sign <i> <raw_data hex> [оценка, sun]  -> r || s || recid
+// Оценку реальной стоимости (энергия, bandwidth) считает хост — устройство её проверить не
+// может и показывает как «Fee (est.)» рядом с проверяемым потолком fee_limit.
 #include "mw.h"
 
 #define TRX_DECIMALS 6
 #define HIGH_FEE_SUN 100000000ULL  // 100 TRX
+#define MEMO_TEXT_MAX 96  // memo длиннее на экран целиком не влезает — отказ, а не обрезка
+#define MEMO_HEX_MAX 48
 
 typedef struct {
   const char *symbol;
@@ -34,9 +41,12 @@ static const token_t *find_token(const uint8_t a[20]) {
 typedef struct {
   uint8_t owner[20];
   uint8_t to[20];
-  const token_t *token;  // 0 — перевод TRX
+  const token_t *token;  // TRC20 из белого списка; 0 — TRX или TRC10
+  char trc10[16];        // ID токена TRC10 ("1002000"); "" — не TRC10
   uint8_t amount[32];    // big-endian
   uint64_t fee_limit;    // sun, только TRC20
+  const uint8_t *memo;   // raw_data.data
+  size_t memo_len;
 } tron_tx_t;
 
 // ---------- protobuf ----------
@@ -113,6 +123,29 @@ static const char *parse_transfer(const uint8_t *b, size_t n, tron_tx_t *tx) {
   return have == 7 ? 0 : "incomplete transfer";
 }
 
+// TransferAssetContract: 1 asset_name (ID токена цифрами), 2 owner, 3 to, 4 amount
+static const char *parse_asset(const uint8_t *b, size_t n, tron_tx_t *tx) {
+  uint32_t have = 0;
+  FOR_FIELDS(b, n, f, rc) {
+    if (f.num == 1 && f.wt == 2) {
+      if (!f.dlen || f.dlen >= sizeof tx->trc10) return "bad token id";
+      for (size_t i = 0; i < f.dlen; i++)
+        if (f.d[i] < '0' || f.d[i] > '9') return "bad token id";
+      memcpy(tx->trc10, f.d, f.dlen);
+      tx->trc10[f.dlen] = 0;
+      have |= 1;
+    } else if (f.num == 2 && tron_addr(&f, tx->owner)) have |= 2;
+    else if (f.num == 3 && tron_addr(&f, tx->to)) have |= 4;
+    else if (f.num == 4 && f.wt == 0) {
+      if (f.v == 0 || f.v >> 63) return "bad amount";
+      for (int i = 0; i < 8; i++) tx->amount[31 - i] = (uint8_t)(f.v >> (8 * i));
+      have |= 8;
+    } else return "unsupported asset transfer field";
+  }
+  if (rc < 0) return "bad protobuf";
+  return have == 15 ? 0 : "incomplete asset transfer";
+}
+
 static const char *parse_trigger(const uint8_t *b, size_t n, tron_tx_t *tx) {
   static const uint8_t SEL[4] = {0xa9, 0x05, 0x9c, 0xbb};  // transfer(address,uint256)
   uint8_t contract[20];
@@ -144,6 +177,7 @@ static int str_eq(const pb_field_t *f, const char *s) {
 static const char *parse_contract(const uint8_t *b, size_t n, tron_tx_t *tx) {
   static const char TRANSFER[] = "type.googleapis.com/protocol.TransferContract";
   static const char TRIGGER[] = "type.googleapis.com/protocol.TriggerSmartContract";
+  static const char ASSET[] = "type.googleapis.com/protocol.TransferAssetContract";
   uint64_t type = 0;
   pb_field_t url = {0}, val = {0};
   FOR_FIELDS(b, n, f, rc) {
@@ -166,6 +200,7 @@ static const char *parse_contract(const uint8_t *b, size_t n, tron_tx_t *tx) {
   if (val.wt != 2 || !val.d) return "no parameter";
   if (type == 1 && str_eq(&url, TRANSFER)) return parse_transfer(val.d, val.dlen, tx);
   if (type == 31 && str_eq(&url, TRIGGER)) return parse_trigger(val.d, val.dlen, tx);
+  if (type == 2 && str_eq(&url, ASSET)) return parse_asset(val.d, val.dlen, tx);
   return "unsupported contract type";
 }
 
@@ -188,18 +223,39 @@ static const char *tron_parse(const uint8_t *raw, size_t len, tron_tx_t *tx) {
         if (f.wt != 0 || f.v >> 63) return "bad fee limit";
         tx->fee_limit = f.v;
         break;
+      case 10:  // data — memo
+        if (f.wt != 2) return "bad protobuf";
+        tx->memo = f.d;
+        tx->memo_len = f.dlen;
+        break;
       case 11:  // contract
         if (f.wt != 2) return "bad protobuf";
         contracts++;
         if ((e = parse_contract(f.d, f.dlen, tx))) return e;
         break;
-      default:  // auths, data (memo), scripts ...
+      default:  // auths, scripts ...
         return "unsupported tx field";
     }
   }
   if (rc < 0) return "bad protobuf";
   if (contracts != 1) return "need exactly one contract";
   if (!tx->token && tx->fee_limit) return "fee limit on TRX transfer";
+  return 0;
+}
+
+// Memo на экран: печатный ASCII — как есть, иначе hex; слишком длинный — отказ (не обрезаем)
+static const char *memo_text(const tron_tx_t *tx, char out[2 * MEMO_HEX_MAX + 1]) {
+  int text = 1;
+  for (size_t i = 0; i < tx->memo_len; i++)
+    if (tx->memo[i] < 0x20 || tx->memo[i] > 0x7E) text = 0;
+  if (text) {
+    if (tx->memo_len > MEMO_TEXT_MAX) return "memo too long to show";
+    memcpy(out, tx->memo, tx->memo_len);
+    out[tx->memo_len] = 0;
+  } else {
+    if (tx->memo_len > MEMO_HEX_MAX) return "memo too long to show";
+    mw_hex(tx->memo, tx->memo_len, out);
+  }
   return 0;
 }
 
@@ -231,10 +287,26 @@ static int encode(const uint8_t id[20], char out[40]) {
 
 // ---------- команды ----------
 
-static void cmd_sign(uint32_t idx, const char *hex, size_t hl) {
+// Десятичное u64 (оценка в sun)
+static int parse_u64(const char *s, size_t n, uint64_t *v) {
+  if (!n || n > 19) return 0;
+  *v = 0;
+  for (size_t i = 0; i < n; i++) {
+    if (s[i] < '0' || s[i] > '9') return 0;
+    *v = *v * 10 + (uint64_t)(s[i] - '0');
+  }
+  return 1;
+}
+
+static void cmd_sign(uint32_t idx, const char *hex, size_t hl, const char *est_s, size_t est_n) {
   static uint8_t raw[1536];
   static tron_tx_t tx;
   uint8_t own[20];
+  uint64_t est = 0;
+  if (est_n && !parse_u64(est_s, est_n, &est)) {
+    mw_err("bad fee estimate");
+    return;
+  }
   int n = mw_unhex(hex, hl, raw, sizeof raw);
   if (n <= 0) {
     mw_err("bad hex");
@@ -246,17 +318,39 @@ static void cmd_sign(uint32_t idx, const char *hex, size_t hl) {
     mw_err(e);
     return;
   }
-  char to[40], num[80], amt[96], fee[48];
+  if (tx.token && est_n && est > tx.fee_limit) {  // хост врёт, или транзакция всё равно не пройдёт
+    mw_err("fee estimate above fee limit");
+    return;
+  }
+  static char memo[2 * MEMO_HEX_MAX + 1];
+  if (tx.memo_len && (e = memo_text(&tx, memo))) {
+    mw_err(e);
+    return;
+  }
+  char to[40], num[80], amt[96], fee[48], tok[32];
   encode(tx.to, to);
-  mw_fmt_units(tx.amount, 32, tx.token ? tx.token->decimals : TRX_DECIMALS, num, sizeof num);
-  mw_cat(amt, sizeof amt, num, " ", tx.token ? tx.token->symbol : "TRX");
+  if (tx.trc10[0]) {  // TRC10: точность неизвестна — целые единицы
+    mw_fmt_units(tx.amount, 32, 0, num, sizeof num);
+    mw_cat(amt, sizeof amt, num, " units", 0);
+    mw_cat(tok, sizeof tok, "TRC10 #", tx.trc10, 0);
+  } else {
+    mw_fmt_units(tx.amount, 32, tx.token ? tx.token->decimals : TRX_DECIMALS, num, sizeof num);
+    mw_cat(amt, sizeof amt, num, " ", tx.token ? tx.token->symbol : "TRX");
+  }
   mw_amount("Amount", amt);
+  if (tx.trc10[0]) mw_field("Token", tok);
   mw_field("To", to);
+  if (tx.memo_len) mw_field("Memo", memo);
   if (tx.token) {  // TRC20: TRX сжигается за энергию, fee_limit — верхняя граница
     if (tx.fee_limit > HIGH_FEE_SUN) mw_warn("High fee!", "check it carefully");
     mw_fmt_u64(tx.fee_limit, TRX_DECIMALS, num, sizeof num);
     mw_cat(fee, sizeof fee, num, " TRX", 0);
     mw_amount("Max fee", fee);
+  }
+  if (est_n) {  // оценка хоста: устройство её не проверяет — так и подписано
+    mw_fmt_u64(est, TRX_DECIMALS, num, sizeof num);
+    mw_cat(fee, sizeof fee, "~", num, " TRX");
+    mw_field("Fee (est.)", fee);
   }
   if (!mw_confirm("TRON transfer")) {
     mw_err("rejected");
@@ -286,9 +380,9 @@ void mw_main(const char *cmd, size_t len) {
     return;
   }
   if (wl == 4 && !memcmp(w, "sign", 4)) {
-    const char *hx;
-    size_t hl = mw_word(&p, end, &hx);
-    cmd_sign(idx, hx, hl);
+    const char *hx, *es;
+    size_t hl = mw_word(&p, end, &hx), el = mw_word(&p, end, &es);
+    cmd_sign(idx, hx, hl, es, el);
     return;
   }
   if (wl != 4 || (memcmp(w, "addr", 4) && memcmp(w, "show", 4))) {

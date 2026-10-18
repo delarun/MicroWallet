@@ -34,7 +34,8 @@ data class SendRequest(
     val asset: String? = null,
     val index: Int = 0,
     val feerate: BigDecimal? = null,    // BTC/PRL: sat/vB
-    val feeLimit: String? = null,       // TRON USDT: TRX
+    val feeLimit: String? = null,       // TRON USDT: TRX; null — 40 или оценка + 20 %
+    val memo: String? = null,           // TRON: заметка к переводу
     val gasPrice: String? = null,       // BSC: gwei
 )
 
@@ -458,11 +459,14 @@ class Wallet(
         if (coin == "tron") {
             val acc = tronPost("/wallet/getaccount", JSONObject().put("address", addr).put("visible", true)) as JSONObject
             val notes = if (acc.length() == 0) listOf("Аккаунт не активирован: нужно получить хотя бы 1 TRX") else emptyList()
+            val v2 = acc.optJSONArray("assetV2") ?: JSONArray()
+            val trc10 = (0 until v2.length()).map { v2.getJSONObject(it) }.filter { it.optLong("value") > 0 }
+                .map { Asset("trc10:" + it.getString("key"), "#" + it.getString("key"), 0, BigInteger.valueOf(it.getLong("value"))) }
             return Balance(
                 addr, listOf(
                     Asset("usdt", "USDT", 6, tronUsdt(addr)),
                     Asset("trx", "TRX", 6, BigInteger.valueOf(acc.optLong("balance", 0))),
-                ), notes = notes
+                ) + trc10, notes = notes
             )
         }
         val chain = cfg.evm(coin, chainId)
@@ -481,7 +485,7 @@ class Wallet(
         val asset = req.asset ?: coinInfo(req.coin).assetsFor(net)[0].first
         return when (req.coin) {
             "btc", "prl" -> prepareUtxo(req.coin, req.dest, req.amount, req.feerate)
-            "tron" -> prepareTron(req.index, req.dest, req.amount, asset, req.feeLimit)
+            "tron" -> prepareTron(req.index, req.dest, req.amount, asset, req.feeLimit, req.memo)
             else -> prepareEvm(cfg.evm(req.coin, chainId), req.index, req.dest, req.amount, asset, req.gasPrice)
         }
     }
@@ -667,44 +671,114 @@ class Wallet(
         return if (v.isNotEmpty()) BigInteger(v, 16) else BigInteger.ZERO
     }
 
-    private fun prepareTron(index: Int, destIn: String, amount: String, asset: String, feeLimitIn: String?): Draft {
+    /** Для оценки сожжённых TRX: параметры сети, ресурсы аккаунта, получатель новый.
+     *  null — нода не ответила: подпишем без оценки, потолок fee_limit всё равно есть. */
+    private class TronEst(val cp: Map<String, Long>, val res: JSONObject, val new: Boolean)
+
+    private fun tronEstimate(owner: String, dest: String, activation: Boolean): TronEst? = try {
+        val arr = (tronPost("/wallet/getchainparameters", JSONObject()) as JSONObject).optJSONArray("chainParameter") ?: JSONArray()
+        val cp = (0 until arr.length()).map { arr.getJSONObject(it) }.associate { it.getString("key") to it.optLong("value") }
+        val res = tronPost("/wallet/getaccountresource", JSONObject().put("address", owner).put("visible", true)) as JSONObject
+        val new = activation &&
+            (tronPost("/wallet/getaccount", JSONObject().put("address", dest).put("visible", true)) as JSONObject).length() == 0
+        TronEst(cp, res, new)
+    } catch (e: WalletError) {
+        null
+    } catch (e: org.json.JSONException) {
+        null
+    }
+
+    /** Оценка сожжённых sun: bandwidth (подписанная транзакция + 64 Б, как считает нода), энергия
+     *  сверх застейканной, активация нового адреса, плата за memo. Как _tron_burn в wallet.py. */
+    private fun tronBurn(e: TronEst, rawLen: Int, energy: Long?, memo: Boolean): Long {
+        val size = rawLen + varint(rawLen).size + 1 + 67 + 64
+        val staked = e.res.optLong("NetLimit") - e.res.optLong("NetUsed")
+        val free = e.res.optLong("freeNetLimit") - e.res.optLong("freeNetUsed")
+        var burn = 0L
+        if (e.new) {
+            burn += e.cp["getCreateNewAccountFeeInSystemContract"] ?: 1_000_000
+            if (staked < size) burn += e.cp["getCreateAccountFee"] ?: 100_000
+        } else if (staked < size && free < size) {
+            burn += size * (e.cp["getTransactionFee"] ?: 1000)
+        }
+        if (energy != null && energy > 0) {
+            val avail = maxOf(0L, e.res.optLong("EnergyLimit") - e.res.optLong("EnergyUsed"))
+            burn += maxOf(0L, energy - avail) * (e.cp["getEnergyFee"] ?: 420)
+        }
+        if (memo) burn += e.cp["getMemoFee"] ?: 0
+        return burn
+    }
+
+    private fun prepareTron(index: Int, destIn: String, amount: String, asset: String, feeLimitIn: String?, memoIn: String?): Draft {
         val dest = destIn.trim()
         val owner = address("tron", index)
         val to21 = tronDecode(dest)
-        val feeLimit = try {
-            BigDecimal(feeLimitIn?.trim()?.replace(',', '.') ?: "40")
+        val memo = (memoIn ?: "").toByteArray()
+        if (memo.size > TRON_MEMO_MAX || memo.any { it < 0x20 || it > 0x7E })
+            throw WalletError("Memo — печатные латинские символы, не длиннее $TRON_MEMO_MAX")
+        val usdt = asset == "usdt"
+        val trc10 = asset.startsWith("trc10:")
+        val tokenId = asset.removePrefix("trc10:")
+        if (trc10 && (tokenId.isEmpty() || !tokenId.all { it in '0'..'9' })) throw WalletError("Неверный ID токена TRC10: $tokenId")
+        val units = toUnits(amount, if (trc10) 0 else 6)
+        var energy: Long? = null
+        val call = JSONObject()
+        if (usdt) {
+            val param = (ByteArray(12) + to21.copyOfRange(1, 21)).hex() + units.toBytes(32).hex()
+            call.put("owner_address", owner).put("contract_address", cfg.tronUsdt)
+                .put("function_selector", "transfer(address,uint256)").put("parameter", param).put("visible", true)
+            energy = try {  // сколько энергии съест перевод (у нового держателя USDT — вдвое больше)
+                (tronPost("/wallet/triggerconstantcontract", JSONObject(call.toString())) as JSONObject)
+                    .optLong("energy_used").takeIf { it > 0 }
+            } catch (e: WalletError) {
+                null
+            }
+        }
+        val est = tronEstimate(owner, dest, !usdt)
+        // до сборки размер транзакции неизвестен: 300 Б — с запасом больше любой нашей raw_data
+        val pre = if (est != null && energy != null) tronBurn(est, 300, energy, memo.isNotEmpty()) else null
+        val feeLimit = if (feeLimitIn.isNullOrBlank()) {  // 40 TRX, а если энергия дороже — оценка + 20 %
+            maxOf(BigDecimal(40), BigDecimal((pre ?: 0) * 12 / 10_000_000 + if ((pre ?: 0) * 12 % 10_000_000 != 0L) 1 else 0))
+        } else try {
+            BigDecimal(feeLimitIn.trim().replace(',', '.'))
         } catch (e: NumberFormatException) {
             throw WalletError("Неверный лимит комиссии: $feeLimitIn")
         }
-        val units = toUnits(amount, 6)
+        val feeLimitSun = toUnits(feeLimit.toPlainString(), 6).toLong()
+        if (pre != null && pre > feeLimitSun)
+            throw WalletError("Оценка комиссии ≈${fmtUnits(pre, 6)} TRX выше лимита ${feeLimit.toPlainString()} TRX — подними лимит")
         val tx: JSONObject
-        if (asset == "usdt") {
-            val param = (ByteArray(12) + to21.copyOfRange(1, 21)).hex() + units.toBytes(32).hex()
-            val r = tronPost(
-                "/wallet/triggersmartcontract", JSONObject()
-                    .put("owner_address", owner).put("contract_address", cfg.tronUsdt)
-                    .put("function_selector", "transfer(address,uint256)").put("parameter", param)
-                    .put("fee_limit", toUnits(feeLimit.toPlainString(), 6).toLong()).put("call_value", 0)
-                    .put("visible", true)
-            ) as JSONObject
+        if (usdt) {
+            val r = tronPost("/wallet/triggersmartcontract", call.put("fee_limit", feeLimitSun).put("call_value", 0)) as JSONObject
             val res = r.optJSONObject("result")
             if (res == null || !res.optBoolean("result"))
                 throw WalletError("Нода отказалась собрать транзакцию: ${tronErr(res ?: r)}")
             tx = r.getJSONObject("transaction")
+        } else if (trc10) {
+            tx = tronPost(
+                "/wallet/transferasset", JSONObject()
+                    .put("owner_address", owner).put("to_address", dest).put("asset_name", tokenId)
+                    .put("amount", units.toLong()).put("visible", true)
+            ) as JSONObject
         } else {
             tx = tronPost(
                 "/wallet/createtransaction", JSONObject()
                     .put("owner_address", owner).put("to_address", dest).put("amount", units.toLong()).put("visible", true)
             ) as JSONObject
-            if (!tx.has("raw_data_hex")) throw WalletError("Нода отказалась собрать транзакцию: ${tronErr(tx)}")
         }
-        val raw = tx.getString("raw_data_hex").unhex()
-        val txId = tx.getString("txID")
-        if (sha256(raw).hex() != txId)
+        if (!tx.has("raw_data_hex")) throw WalletError("Нода отказалась собрать транзакцию: ${tronErr(tx)}")
+        var raw = tx.getString("raw_data_hex").unhex()
+        if (sha256(raw).hex() != tx.getString("txID"))
             throw WalletError("Нода вернула несогласованную транзакцию (txID != sha256(raw_data))")
+        if (memo.isNotEmpty()) raw = tronWithMemo(raw, memo)
+        val txId = sha256(raw).hex()
+        val burn = est?.let { tronBurn(it, raw.size, energy, memo.isNotEmpty()) }
+        if (usdt && burn != null && burn > feeLimitSun)
+            throw WalletError("Оценка комиссии ≈${fmtUnits(burn, 6)} TRX выше лимита ${feeLimit.toPlainString()} TRX — подними лимит")
 
         val sign = {
-            val sig = dev.call(cmd("tron", "sign $index ${raw.hex()}")).unhex()
+            val arg = if (burn != null) " $burn" else ""
+            val sig = dev.call(cmd("tron", "sign $index ${raw.hex()}$arg")).unhex()
             val s = sig.copyOfRange(0, 64) + byteArrayOf((sig[64] + 27).toByte())
             val signed = byteArrayOf(0x0a) + varint(raw.size) + raw + byteArrayOf(0x12) + varint(s.size) + s
             signed.hex() to txId
@@ -713,14 +787,16 @@ class Wallet(
             val r = tronPost("/wallet/broadcasthex", JSONObject().put("transaction", rawHex)) as JSONObject
             if (!r.optBoolean("result")) throw WalletError("Сеть отклонила транзакцию: ${r.opt("code")} ${tronErr(r)}")
         }
-        val usdt = asset == "usdt"
+        val notes = ArrayList<String>()
+        if (usdt) notes += if (burn != null) "Оценка: сгорит ≈${fmtUnits(burn, 6)} TRX"
+        else "Оценку получить не удалось; реально спишется меньше лимита"
+        else if (est?.new == true) notes += "Получатель новый: +1 TRX за активацию адреса"
+        if (memo.isNotEmpty()) notes += "Memo: ${String(memo)}"
         return Draft(
-            "tron", asset, if (usdt) "USDT" else "TRX", owner, dest, fmtUnits(units, 6),
-            if (usdt) feeLimit.toPlainString() else "~0.3", "TRX",
-            feeLabel = if (usdt) "Макс. комиссия" else "Комиссия",
-            notes = if (usdt) listOf("Реально спишется меньше — по расходу энергии")
-            else listOf("Платится сетью за bandwidth; новому адресу +1 TRX за активацию"),
-            sign = sign, broadcast = broadcast, txUrl = cfg.tronTxUrl,
+            "tron", asset, symbol(asset), owner, dest, fmtUnits(units, if (trc10) 0 else 6),
+            if (usdt) feeLimit.toPlainString() else burn?.let { "≈" + fmtUnits(it, 6) } ?: "?", "TRX",
+            feeLabel = if (usdt) "Макс. комиссия" else "Комиссия (оценка)",
+            notes = notes, sign = sign, broadcast = broadcast, txUrl = cfg.tronTxUrl,
         )
     }
 

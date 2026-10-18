@@ -479,7 +479,7 @@ class DemoWallet:
             else {"fast": Decimal(6), "normal": Decimal(3), "slow": Decimal(1)}
 
     def prepare_send(self, coin, dest, amount, asset=None, index=0, feerate=None, fee_limit=None,
-                     gas_price=None):
+                     gas_price=None, memo=None):
         time.sleep(.8)
         {"btc": lambda: W.address_to_script(dest, "tb"), "prl": lambda: W.address_to_script(dest, "tprl", True),
          "tron": lambda: W.tron_decode(dest), "bsc": lambda: W.evm_decode(dest)}[coin]()
@@ -940,11 +940,18 @@ class SendPage(Page):
         self.fee_seg = Segmented([("slow", "Медленно"), ("normal", "Обычно"), ("fast", "Быстро")])
         self.fee_seg.btns["normal"].setChecked(True)
         f.addWidget(self.fee_seg, 0, Qt.AlignLeft)
-        self.fee_limit = QLineEdit("40")
+        self.fee_limit = QLineEdit()
+        self.fee_limit.setPlaceholderText("авто")
         self.fee_limit.setFixedWidth(120)
         f.addWidget(self.fee_limit, 0, Qt.AlignLeft)
         self.fee_info = label("", "faint", wrap=True)
         f.addWidget(self.fee_info)
+        self.memo_title = label("Memo (необязательно)", "muted")
+        f.addWidget(self.memo_title)
+        self.memo = QLineEdit()
+        self.memo.setPlaceholderText("видно в блокчейне всем; стоит ~1 TRX")
+        self.memo.setMaxLength(W.TRON_MEMO_MAX)
+        f.addWidget(self.memo)
 
         f.addSpacing(8)
         bottom = QHBoxLayout()
@@ -966,6 +973,9 @@ class SendPage(Page):
 
     def coin_changed(self, coin):
         assets = [(a, self.app.symbol(a)) for a, _ in W.COINS[coin]["assets"]]
+        if coin == "tron":  # TRC10 — те, что есть на балансе (их ID знает только нода)
+            bal = self.app.overview.balances.get("tron") or {}
+            assets += [(x["id"], x["symbol"]) for x in bal.get("assets", []) if x["id"].startswith("trc10:")][:3]
         self.asset.set_items(assets)
         self.asset.setVisible(len(assets) > 1)
         self.asset_label.setVisible(len(assets) > 1)
@@ -994,13 +1004,15 @@ class SendPage(Page):
         utxo = coin in ("btc", "prl")
         self.fee_seg.setVisible(utxo)
         self.fee_limit.setVisible(coin == "tron" and asset == "usdt")
+        self.memo_title.setVisible(coin == "tron")
+        self.memo.setVisible(coin == "tron")
         if utxo:
             self.fee_title.setText("Скорость подтверждения")
             self.fee_info.setText("Комиссия считается по размеру транзакции и выбранной ставке")
         elif coin == "tron":
             self.fee_title.setText("Лимит комиссии, TRX" if asset == "usdt" else "Комиссия")
-            self.fee_info.setText("Энергия оплачивается сжиганием TRX; это верхняя граница"
-                                  if asset == "usdt" else "Обычно ~0.3 TRX за bandwidth; новому адресу +1 TRX")
+            self.fee_info.setText("Энергия оплачивается сжиганием TRX; это верхняя граница. Пусто — по оценке сети"
+                                  if asset == "usdt" else "Оценка — на следующем шаге: bandwidth, новому адресу +1 TRX")
         else:
             self.fee_title.setText("Комиссия")
             self.fee_info.setText(f"Цена газа — по сети, оплачивается в {self.app.symbol('bnb')}")
@@ -1041,7 +1053,9 @@ class SendPage(Page):
         if coin in ("btc", "prl"):
             kw["feerate"] = self.fee_levels.get(self.fee_seg.current())
         if coin == "tron" and asset == "usdt":
-            kw["fee_limit"] = self.fee_limit.text().strip() or "40"
+            kw["fee_limit"] = self.fee_limit.text().strip() or None
+        if coin == "tron":
+            kw["memo"] = self.memo.text() or None
         amount = self.amount.text().strip().replace(",", ".")
 
         def done(d):

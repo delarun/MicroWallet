@@ -231,6 +231,49 @@ fun varint(value: Int): ByteArray {
     }
 }
 
+const val TRON_MEMO_MAX = 96  // столько устройство показывает целиком (печатный текст)
+
+/** raw_data + поле 10 (data) на своё место: нода пересобирает raw_data по порядку полей и
+ *  считает txID по нему — поле не по порядку дало бы подпись не под тем хешем. */
+fun tronWithMemo(raw: ByteArray, memo: ByteArray): ByteArray {
+    val out = ByteArrayOutputStream()
+    val field = byteArrayOf(0x52) + varint(memo.size) + memo
+    var pos = 0
+    var done = false
+    fun readVarint(): Long {
+        var v = 0L
+        var shift = 0
+        while (true) {
+            if (pos >= raw.size || shift > 63) throw WalletError("битый protobuf")
+            val c = raw[pos++].toInt() and 0xFF
+            v = v or ((c and 0x7F).toLong() shl shift)
+            shift += 7
+            if (c and 0x80 == 0) return v
+        }
+    }
+    while (pos < raw.size) {
+        val start = pos
+        val key = readVarint()
+        val num = key ushr 3
+        when ((key and 7).toInt()) {
+            0 -> readVarint()
+            2 -> {
+                val n = readVarint().toInt()  // не «pos += readVarint()»: pos прочитался бы до вызова
+                pos += n
+            }
+            else -> throw WalletError("неожиданное поле в raw_data")
+        }
+        if (num == 10L) throw WalletError("в транзакции уже есть memo")
+        if (num > 10 && !done) {
+            out.write(field)
+            done = true
+        }
+        out.write(raw, start, minOf(pos, raw.size) - start)
+    }
+    if (!done) out.write(field)
+    return out.toByteArray()
+}
+
 // ---------------- для показа ----------------
 
 fun shortAddr(addr: String, n: Int = 10): String =

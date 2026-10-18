@@ -85,7 +85,7 @@ class DemoWallet(empty: Boolean = false, private val wordlist: List<String> = em
         val (fee, feeSym) = when (req.coin) {
             "btc" -> "0.00000424" to "tBTC"
             "prl" -> "0.00246824" to "tPRL"
-            "tron" -> (req.feeLimit ?: "40") to "TRX"
+            "tron" -> (req.feeLimit ?: "40") to "TRX"  // в демо оценки нет
             "eth" -> "0.000042" to "SepoliaETH"
             else -> "0.00000612" to "tBNB"
         }

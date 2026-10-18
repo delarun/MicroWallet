@@ -81,7 +81,7 @@ fun NetConfig.symbol(asset: String): String = when (asset) {
     "btc" -> btc
     "bnb" -> bnb
     "prl" -> prl
-    else -> asset.uppercase()
+    else -> if (asset.startsWith("trc10:")) "#" + asset.removePrefix("trc10:") else asset.uppercase()
 }
 
 class CoinInfo(

@@ -57,6 +57,7 @@ import io.microwallet.app.core.SendRequest
 import io.microwallet.app.core.SendResult
 import io.microwallet.app.core.WalletError
 import io.microwallet.app.core.addressToScript
+import io.microwallet.app.core.TRON_MEMO_MAX
 import io.microwallet.app.core.assetsFor
 import io.microwallet.app.core.coinInfo
 import io.microwallet.app.core.evmDecode
@@ -76,7 +77,8 @@ class SendState {
     var dest by mutableStateOf("")
     var amount by mutableStateOf("")
     var feeLevel by mutableStateOf("normal")
-    var feeLimit by mutableStateOf("40")
+    var feeLimit by mutableStateOf("")  // пусто — 40 TRX или оценка + 20 %
+    var memo by mutableStateOf("")
     var dry by mutableStateOf(false)
     var levels by mutableStateOf<Map<String, BigDecimal>?>(null)
     var step by mutableStateOf(Step.Form)
@@ -96,6 +98,7 @@ class SendState {
     fun reset() {
         dest = ""
         amount = ""
+        memo = ""
         draft = null
         result = null
         error = null
@@ -199,10 +202,13 @@ private fun SendForm(vm: AppViewModel) {
     }
     CoinPills(vm.coins, s.coin) { s.selectCoin(it) }
     Card {
-        val assets = coinInfo(s.coin).assetsFor(w.net)
+        // TRC10 — те, что есть на балансе (их ID знает только нода)
+        val trc10 = if (s.coin != "tron") emptyList() else (vm.balances["tron"] as? Load.Ok)?.v?.assets
+            ?.map { it.id }?.filter { it.startsWith("trc10:") }.orEmpty().take(2)
+        val assets = coinInfo(s.coin).assetsFor(w.net).map { it.first } + trc10
         if (assets.size > 1) {
             FieldLabel("Актив")
-            Segmented(assets.map { it.first to w.symbol(it.first) }, s.asset, { s.asset = it }, Modifier.fillMaxWidth())
+            Segmented(assets.map { it to w.symbol(it) }, s.asset, { s.asset = it }, Modifier.fillMaxWidth())
             Spacer(Modifier.height(10.dp))
         }
 
@@ -264,15 +270,22 @@ private fun SendForm(vm: AppViewModel) {
                 )
                 Hint("Комиссия считается по размеру транзакции и выбранной ставке")
             }
-            s.coin == "tron" && s.asset == "usdt" -> {
-                FieldLabel("Лимит комиссии, TRX")
-                InputField(s.feeLimit, { s.feeLimit = it.replace(',', '.') },
-                    keyboard = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.width(160.dp))
-                Hint("Энергия оплачивается сжиганием TRX; это верхняя граница")
-            }
             s.coin == "tron" -> {
-                FieldLabel("Комиссия")
-                Hint("Обычно ~0.3 TRX за bandwidth; новому адресу +1 TRX")
+                if (s.asset == "usdt") {
+                    FieldLabel("Лимит комиссии, TRX")
+                    InputField(s.feeLimit, { s.feeLimit = it.replace(',', '.') }, placeholder = "авто",
+                        keyboard = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.width(160.dp))
+                    Hint("Энергия оплачивается сжиганием TRX; это верхняя граница. Пусто — по оценке сети")
+                } else {
+                    FieldLabel("Комиссия")
+                    Hint("Оценка — на следующем шаге: bandwidth, новому адресу +1 TRX")
+                }
+                Spacer(Modifier.height(10.dp))
+                FieldLabel("Memo (необязательно)")
+                InputField(s.memo, { s.memo = it.filter { ch -> ch.code in 0x20..0x7E }.take(TRON_MEMO_MAX) },
+                    placeholder = "видно в блокчейне всем",
+                    keyboard = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii))
+                if (s.memo.isNotEmpty()) Hint("Memo стоит ~1 TRX и показывается на устройстве")
             }
             else -> {
                 FieldLabel("Комиссия")
@@ -298,7 +311,8 @@ private fun SendForm(vm: AppViewModel) {
                 val req = SendRequest(
                     coin = s.coin, dest = s.dest, amount = s.amount, asset = s.asset,
                     feerate = if (utxo) s.levels?.get(s.feeLevel) else null,
-                    feeLimit = if (s.coin == "tron" && s.asset == "usdt") s.feeLimit.ifBlank { "40" } else null,
+                    feeLimit = if (s.coin == "tron" && s.asset == "usdt") s.feeLimit.ifBlank { null } else null,
+                    memo = if (s.coin == "tron") s.memo.ifEmpty { null } else null,
                 )
                 vm.run({ w.prepareSend(req) }, {
                     s.preparing = false

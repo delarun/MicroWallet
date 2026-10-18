@@ -65,7 +65,10 @@ def main():
     responses = {}  # "GET url" / "POST url method" -> JSON; "RAW url" -> текст
 
     def http_json(url, body=None, headers=None):
-        key = f"GET {url}" if body is None else f"POST {url} {body.get('method', '')}".rstrip()
+        # JSON-RPC различаем по method, вызовы контрактов TRON — по function_selector
+        # и по fee_limit (транзакцию с каким лимитом просили собрать)
+        key = "GET " + url if body is None else " ".join(str(x) for x in (
+            "POST", url, body.get("method") or body.get("function_selector"), body.get("fee_limit")) if x)
         if key not in responses:
             raise W.WalletError(f"нет ответа для {key}")
         return json.loads(json.dumps(responses[key]))
@@ -169,25 +172,51 @@ def main():
         owner = w.address("tron", 0)
         tdest = "TTojvqHHL6UQ2gcYSHSjLsYK8B6dFV7j7Z"
         o21, t21 = W.tron_decode(owner), W.tron_decode(tdest)
+        api = cfg["tron_api"]
+        # оценка комиссии: бесплатный bandwidth израсходован, энергии нет, получатель новый
+        responses[f"POST {api}/wallet/getchainparameters"] = {"chainParameter": [
+            {"key": "getTransactionFee", "value": 1000}, {"key": "getEnergyFee", "value": 420},
+            {"key": "getCreateNewAccountFeeInSystemContract", "value": 1000000},
+            {"key": "getCreateAccountFee", "value": 100000}, {"key": "getMemoFee", "value": 1000000}]}
+        responses[f"POST {api}/wallet/getaccountresource"] = {"freeNetLimit": 600, "freeNetUsed": 600}
+        responses[f"POST {api}/wallet/getaccount"] = {}
         raw = tron_raw(1, "type.googleapis.com/protocol.TransferContract",
                        pb(1, 2, o21) + pb(2, 2, t21) + pb(3, 0, 5_000_000))
-        responses[f"POST {cfg['tron_api']}/wallet/createtransaction"] = {
+        responses[f"POST {api}/wallet/createtransaction"] = {
             "raw_data_hex": raw.hex(), "txID": hashlib.sha256(raw).hexdigest()}
-        d3 = w.prepare_send("tron", tdest, "5", asset="trx")
-        r = w.sign_and_send(d3, broadcast=False)
-        cases.append({"coin": "tron", "asset": "trx", "dest": tdest, "amount": "5",
-                      "raw": r["raw"], "txid": r["txid"], "fee": d3.fee, "exact": True})
+        for memo in (None, "invoice 42"):
+            d3 = w.prepare_send("tron", tdest, "5", asset="trx", memo=memo)
+            r = w.sign_and_send(d3, broadcast=False)
+            cases.append({"coin": "tron", "asset": "trx", "dest": tdest, "amount": "5", "memo": memo or "",
+                          "raw": r["raw"], "txid": r["txid"], "fee": d3.fee, "notes": d3.notes, "exact": True})
+
+        raw = tron_raw(2, "type.googleapis.com/protocol.TransferAssetContract",
+                       pb(1, 2, b"1002000") + pb(2, 2, o21) + pb(3, 2, t21) + pb(4, 0, 77))
+        responses[f"POST {api}/wallet/transferasset"] = {"raw_data_hex": raw.hex(), "txID": hashlib.sha256(raw).hexdigest()}
+        d6 = w.prepare_send("tron", tdest, "77", asset="trc10:1002000")
+        r = w.sign_and_send(d6, broadcast=False)
+        cases.append({"coin": "tron", "asset": "trc10:1002000", "dest": tdest, "amount": "77",
+                      "raw": r["raw"], "txid": r["txid"], "fee": d6.fee, "notes": d6.notes, "exact": True})
 
         usdt21 = W.tron_decode(cfg["tron_usdt"])
         data = bytes.fromhex("a9059cbb") + b"\0" * 12 + t21[1:] + (12_500_000).to_bytes(32, "big")
-        raw = tron_raw(31, "type.googleapis.com/protocol.TriggerSmartContract",
-                       pb(1, 2, o21) + pb(2, 2, usdt21) + pb(4, 2, data), fee_limit=30_000_000)
-        responses[f"POST {cfg['tron_api']}/wallet/triggersmartcontract"] = {
-            "result": {"result": True}, "transaction": {"raw_data_hex": raw.hex(), "txID": hashlib.sha256(raw).hexdigest()}}
-        d4 = w.prepare_send("tron", tdest, "12.5", asset="usdt", fee_limit="30")
-        r = w.sign_and_send(d4, broadcast=False)
-        cases.append({"coin": "tron", "asset": "usdt", "dest": tdest, "amount": "12.5", "feeLimit": "30",
-                      "raw": r["raw"], "txid": r["txid"], "fee": d4.fee, "exact": True})
+        responses[f"POST {api}/wallet/triggerconstantcontract transfer(address,uint256)"] = {
+            "result": {"result": True}, "energy_used": 130285}  # новый держатель USDT: ≈54.97 TRX
+        for fee_limit, fl_sun in (("60", 60_000_000), (None, 67_000_000)):  # явный и по оценке + 20 %
+            raw = tron_raw(31, "type.googleapis.com/protocol.TriggerSmartContract",
+                           pb(1, 2, o21) + pb(2, 2, usdt21) + pb(4, 2, data), fee_limit=fl_sun)
+            responses[f"POST {api}/wallet/triggersmartcontract transfer(address,uint256) {fl_sun}"] = {
+                "result": {"result": True}, "transaction": {"raw_data_hex": raw.hex(), "txID": hashlib.sha256(raw).hexdigest()}}
+            d4 = w.prepare_send("tron", tdest, "12.5", asset="usdt", fee_limit=fee_limit)
+            assert d4.fee == str(fl_sun // 10**6), d4.fee
+            r = w.sign_and_send(d4, broadcast=False)
+            cases.append({"coin": "tron", "asset": "usdt", "dest": tdest, "amount": "12.5", "feeLimit": fee_limit or "",
+                          "raw": r["raw"], "txid": r["txid"], "fee": d4.fee, "notes": d4.notes, "exact": True})
+        try:  # оценка выше явного лимита — отказ ещё до устройства
+            w.prepare_send("tron", tdest, "12.5", asset="usdt", fee_limit="50")
+            raise AssertionError("лимит ниже оценки принят")
+        except W.WalletError as e:
+            assert "подними лимит" in str(e), e
 
         # ---------- BSC ----------
         rpc = cfg["bsc_rpc"]

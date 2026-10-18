@@ -29,7 +29,11 @@ class FakeHttp(private val responses: JSONObject) : Http {
 
     override fun get(url: String) = answer("GET $url")
     override fun getText(url: String) = responses.getString("TEXT $url")
-    override fun post(url: String, body: JSONObject) = answer("POST $url ${body.optString("method")}".trimEnd())
+    // как в gen_vectors.py: JSON-RPC — по method, контракты TRON — по function_selector и fee_limit
+    override fun post(url: String, body: JSONObject) = answer(
+        listOf("POST", url, body.optString("method").ifEmpty { body.optString("function_selector") }, body.optString("fee_limit"))
+            .filter { it.isNotEmpty() }.joinToString(" ")
+    )
     override fun postRaw(url: String, raw: String) = responses.getString("RAW $url")
     override fun download(url: String, onProgress: (Long, Long) -> Unit) = throw AssertionError("download $url")
 }
@@ -151,6 +155,7 @@ class SimTest {
                 asset = c.optString("asset").ifEmpty { null },
                 feerate = c.optString("feerate").ifEmpty { null }?.let { BigDecimal(it) },
                 feeLimit = c.optString("feeLimit").ifEmpty { null },
+                memo = c.optString("memo").ifEmpty { null },
             )
             val d = w.prepareSend(req)
             val r = w.signAndSend(d, broadcast = false)
@@ -160,6 +165,7 @@ class SimTest {
             if (c.getBoolean("exact")) assertEquals("raw $what", c.getString("raw"), r.raw)
             else assertEquals("размер $what", c.getString("raw").length, r.raw.length)
             assertFalse(r.broadcast)
+            c.optJSONArray("notes")?.let { n -> assertEquals("notes $what", (0 until n.length()).map { n.getString(it) }, d.notes) }
             if (c.has("balance")) {
                 val b = w.balance("prl")
                 assertEquals(c.getString("balance"), b.assets[0].amount.toString())

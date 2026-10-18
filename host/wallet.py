@@ -18,7 +18,7 @@ MicroWallet: библиотека для общения с устройство�
   python wallet.py btc  send ADDR SATS [--feerate SAT_PER_VB] [--dry-run]
 
   python wallet.py tron receive [-i N] | balance [-i N]
-  python wallet.py tron send ADDR AMOUNT [--token usdt|trx] [--fee-limit 40] [--dry-run]
+  python wallet.py tron send ADDR AMOUNT [--token usdt|trx|trc10:ID] [--fee-limit TRX] [--memo TEXT] [--dry-run]
 
   python wallet.py bsc  receive [-i N] | balance [-i N]
   python wallet.py bsc  send ADDR AMOUNT [--token usdt|bnb] [--gas-price GWEI] [--dry-run]
@@ -118,6 +118,8 @@ class DeviceError(WalletError):
 
 
 def asset_symbol(cfg, asset):
+    if asset.startswith("trc10:"):  # TRC10: ID токена, точность устройству неизвестна
+        return "#" + asset[6:]
     return {"usdt": "USDT", "trx": "TRX"}.get(asset) or cfg[asset]
 
 
@@ -551,6 +553,48 @@ def tron_err(r):
     return msg
 
 
+TRON_MEMO_MAX = 96  # столько устройство показывает целиком (печатный текст)
+
+
+def tron_with_memo(raw, memo):
+    """raw_data + поле 10 (data) на своё место: нода пересобирает raw_data по порядку полей
+    и считает txID по нему — поле не по порядку дало бы подпись не под тем хешем."""
+    out, pos, done = b"", 0, False
+    while pos < len(raw):
+        start = pos
+        key, pos = _read_varint(raw, pos)
+        num, wt = key >> 3, key & 7
+        if num == 10:
+            raise WalletError("в транзакции уже есть memo")
+        if wt == 0:
+            _, pos = _read_varint(raw, pos)
+        elif wt == 2:
+            n, pos = _read_varint(raw, pos)
+            pos += n
+        else:
+            raise WalletError("неожиданное поле в raw_data")
+        if num > 10 and not done:
+            out += b"\x52" + _varint(len(memo)) + memo
+            done = True
+        out += raw[start:pos]
+    if not done:
+        out += b"\x52" + _varint(len(memo)) + memo
+    return out
+
+
+def _read_varint(b, pos):
+    v = shift = 0
+    while True:
+        if pos >= len(b) or shift > 63:
+            raise WalletError("битый protobuf")
+        c = b[pos]
+        pos += 1
+        v |= (c & 0x7F) << shift
+        shift += 7
+        if not c & 0x80:
+            return v, pos
+
+
 def _varint(n):
     out = b""
     while True:
@@ -749,9 +793,11 @@ class Wallet:
         if coin == "tron":
             acc = self._tron_post("/wallet/getaccount", {"address": addr, "visible": True})
             notes = [] if acc else ["Аккаунт не активирован: нужно получить хотя бы 1 TRX"]
+            trc10 = [{"id": "trc10:" + t["key"], "symbol": "#" + t["key"], "decimals": 0, "amount": t["value"]}
+                     for t in acc.get("assetV2", []) if t.get("value")]
             return {"address": addr, "notes": notes, "pending": 0, "assets": [
                 {"id": "usdt", "symbol": "USDT", "decimals": 6, "amount": self._tron_usdt(addr)},
-                {"id": "trx", "symbol": "TRX", "decimals": 6, "amount": acc.get("balance", 0)}]}
+                {"id": "trx", "symbol": "TRX", "decimals": 6, "amount": acc.get("balance", 0)}] + trc10}
         bal = int(self._bsc_rpc("eth_getBalance", addr, "latest"), 16)
         return {"address": addr, "notes": [], "pending": 0, "assets": [
             {"id": "usdt", "symbol": "USDT", "decimals": 18, "amount": self._bsc_usdt(addr)},
@@ -760,14 +806,14 @@ class Wallet:
     # ---- отправка ----
 
     def prepare_send(self, coin, dest, amount, asset=None, index=0,
-                     feerate=None, fee_limit=None, gas_price=None):
+                     feerate=None, fee_limit=None, gas_price=None, memo=None):
         """Собирает транзакцию (без подписи). amount — строка в целых монетах."""
         self.need(coin)
         asset = asset or COINS[coin]["assets"][0][0]
         if coin in ("btc", "prl"):
             return self._prepare_utxo(coin, dest, amount, feerate)
         if coin == "tron":
-            return self._prepare_tron(index, dest, amount, asset, fee_limit)
+            return self._prepare_tron(index, dest, amount, asset, fee_limit, memo)
         return self._prepare_bsc(index, dest, amount, asset, gas_price)
 
     def sign_and_send(self, draft, broadcast=True):
@@ -1002,50 +1048,119 @@ class Wallet:
         res = r.get("constant_result")
         return int(res[0], 16) if res and res[0] else 0
 
-    def _prepare_tron(self, index, dest, amount, asset, fee_limit):
+    def _tron_estimate(self, owner, dest, activation):
+        """Что нужно для оценки сожжённых TRX: (параметры сети, ресурсы аккаунта, получатель
+        новый). None — нода не ответила: подпишем без оценки, потолок fee_limit всё равно есть."""
+        try:
+            cp = self._tron_post("/wallet/getchainparameters", {})
+            cp = {p["key"]: p.get("value", 0) for p in cp.get("chainParameter", [])}
+            res = self._tron_post("/wallet/getaccountresource", {"address": owner, "visible": True})
+            new = activation and not self._tron_post("/wallet/getaccount", {"address": dest, "visible": True})
+        except (WalletError, KeyError, TypeError):
+            return None
+        return cp, res, new
+
+    @staticmethod
+    def _tron_burn(est, raw_len, energy, memo):
+        """Оценка сожжённых sun: bandwidth (размер подписанной транзакции + 64 Б запаса, как
+        считает нода), энергия сверх застейканной, активация нового адреса, плата за memo."""
+        cp, res, new = est
+        size = raw_len + len(_varint(raw_len)) + 1 + 67 + 64
+        staked = res.get("NetLimit", 0) - res.get("NetUsed", 0)
+        free = res.get("freeNetLimit", 0) - res.get("freeNetUsed", 0)
+        burn = 0
+        if new:  # перевод TRX/TRC10 на новый адрес: активация, бесплатный bandwidth не годится
+            burn += cp.get("getCreateNewAccountFeeInSystemContract", 1_000_000)
+            if staked < size:
+                burn += cp.get("getCreateAccountFee", 100_000)
+        elif staked < size and free < size:
+            burn += size * cp.get("getTransactionFee", 1000)
+        if energy:
+            avail = max(0, res.get("EnergyLimit", 0) - res.get("EnergyUsed", 0))
+            burn += max(0, energy - avail) * cp.get("getEnergyFee", 420)
+        if memo:
+            burn += cp.get("getMemoFee", 0)
+        return burn
+
+    def _prepare_tron(self, index, dest, amount, asset, fee_limit, memo=None):
         dest = dest.strip()
         owner = self.address("tron", index)
         to21 = tron_decode(dest)
-        fee_limit = Decimal(str(fee_limit if fee_limit is not None else 40))
-        if asset == "usdt":
-            units = to_units(amount, 6)
+        memo = (memo or "").encode()
+        if len(memo) > TRON_MEMO_MAX or any(c < 0x20 or c > 0x7E for c in memo):
+            raise WalletError(f"Memo — печатные латинские символы, не длиннее {TRON_MEMO_MAX}")
+        usdt, trc10 = asset == "usdt", asset.startswith("trc10:")
+        if trc10 and not asset[6:].isdigit():
+            raise WalletError(f"Неверный ID токена TRC10: {asset[6:]}")
+        units = to_units(amount, 0 if trc10 else 6)
+        energy = None
+        if usdt:
             param = (b"\0" * 12 + to21[1:]).hex() + units.to_bytes(32, "big").hex()
+            call = {"owner_address": owner, "contract_address": self.cfg["tron_usdt"],
+                    "function_selector": "transfer(address,uint256)", "parameter": param, "visible": True}
+            try:  # сколько энергии съест перевод (у нового держателя USDT — вдвое больше)
+                energy = int(self._tron_post("/wallet/triggerconstantcontract", call).get("energy_used") or 0) or None
+            except (WalletError, ValueError):
+                pass
+        est = self._tron_estimate(owner, dest, not usdt)
+        # до сборки транзакции её размер неизвестен: 300 Б — с запасом больше любой нашей raw_data
+        pre = self._tron_burn(est, 300, energy, memo) if est and energy else None
+        if fee_limit is None:  # по умолчанию 40 TRX, а если энергия дороже — оценка + 20 %
+            fee_limit = max(Decimal(40), Decimal(-(-pre * 12 // 10_000_000)) if pre else Decimal(0))
+        fee_limit = Decimal(str(fee_limit))
+        if pre and pre > to_units(fee_limit, 6):
+            raise WalletError(f"Оценка комиссии ≈{fmt_units(pre, 6)} TRX выше лимита {fee_limit} TRX — подними лимит")
+        if usdt:
             r = self._tron_post("/wallet/triggersmartcontract", {
-                "owner_address": owner, "contract_address": self.cfg["tron_usdt"],
-                "function_selector": "transfer(address,uint256)", "parameter": param,
-                "fee_limit": to_units(fee_limit, 6), "call_value": 0, "visible": True})
+                **call, "fee_limit": to_units(fee_limit, 6), "call_value": 0})
             if not r.get("result", {}).get("result"):
                 raise WalletError(f"Нода отказалась собрать транзакцию: {tron_err(r.get('result', r))}")
             tx = r["transaction"]
+        elif trc10:
+            tx = self._tron_post("/wallet/transferasset", {
+                "owner_address": owner, "to_address": dest, "asset_name": asset[6:], "amount": units,
+                "visible": True})
         else:
-            units = to_units(amount, 6)
             tx = self._tron_post("/wallet/createtransaction", {
                 "owner_address": owner, "to_address": dest, "amount": units, "visible": True})
-            if "raw_data_hex" not in tx:
-                raise WalletError(f"Нода отказалась собрать транзакцию: {tron_err(tx)}")
+        if "raw_data_hex" not in tx:
+            raise WalletError(f"Нода отказалась собрать транзакцию: {tron_err(tx)}")
 
         raw = bytes.fromhex(tx["raw_data_hex"])
         if hashlib.sha256(raw).hexdigest() != tx["txID"]:
             raise WalletError("Нода вернула несогласованную транзакцию (txID != sha256(raw_data))")
+        if memo:
+            raw = tron_with_memo(raw, memo)
+        txid = hashlib.sha256(raw).hexdigest()
+        burn = self._tron_burn(est, len(raw), energy, memo) if est else None
+        if usdt and burn is not None and burn > to_units(fee_limit, 6):
+            raise WalletError(f"Оценка комиссии ≈{fmt_units(burn, 6)} TRX выше лимита {fee_limit} TRX — подними лимит")
 
         def sign():
-            sig = bytes.fromhex(self.dev.call(self.cmd("tron", f"sign {index} {raw.hex()}")))
+            arg = f" {burn}" if burn is not None else ""
+            sig = bytes.fromhex(self.dev.call(self.cmd("tron", f"sign {index} {raw.hex()}{arg}")))
             sig = sig[:64] + bytes([sig[64] + 27])
             signed = b"\x0a" + _varint(len(raw)) + raw + b"\x12" + _varint(len(sig)) + sig
-            return signed.hex(), tx["txID"]
+            return signed.hex(), txid
 
         def broadcast(raw_hex):
             r = self._tron_post("/wallet/broadcasthex", {"transaction": raw_hex})
             if not r.get("result"):
                 raise WalletError(f"Сеть отклонила транзакцию: {r.get('code')} {tron_err(r)}")
 
-        usdt = asset == "usdt"
-        return Draft("tron", asset, "USDT" if usdt else "TRX", owner, dest, fmt_units(units, 6),
-                     f"{fee_limit}" if usdt else "~0.3", "TRX",
-                     fee_label="Макс. комиссия" if usdt else "Комиссия",
-                     notes=["Реально спишется меньше — по расходу энергии"] if usdt else
-                     ["Платится сетью за bandwidth; новому адресу +1 TRX за активацию"],
-                     sign=sign, broadcast=broadcast, tx_url=self.cfg["tron_tx_url"])
+        est_s = f"≈{fmt_units(burn, 6)}" if burn is not None else "?"
+        notes = []
+        if usdt:
+            notes.append(f"Оценка: сгорит ≈{fmt_units(burn, 6)} TRX" if burn is not None
+                         else "Оценку получить не удалось; реально спишется меньше лимита")
+        elif est and est[2]:
+            notes.append("Получатель новый: +1 TRX за активацию адреса")
+        if memo:
+            notes.append(f"Memo: {memo.decode()}")
+        return Draft("tron", asset, self.symbol(asset), owner, dest, fmt_units(units, 0 if trc10 else 6),
+                     f"{fee_limit}" if usdt else est_s, "TRX",
+                     fee_label="Макс. комиссия" if usdt else "Комиссия (оценка)",
+                     notes=notes, sign=sign, broadcast=broadcast, tx_url=self.cfg["tron_tx_url"])
 
     # ================= BSC =================
 
@@ -1136,7 +1251,7 @@ def cli_send(w, coin, a):
         amount = fmt_units(to_units(Decimal(a.amount).scaleb(-8), 8), 8)
     d = w.prepare_send(coin, a.address, amount, asset=getattr(a, "token", None), index=a.index,
                        feerate=getattr(a, "feerate", None), fee_limit=getattr(a, "fee_limit", None),
-                       gas_price=getattr(a, "gas_price", None))
+                       gas_price=getattr(a, "gas_price", None), memo=getattr(a, "memo", None))
     print(f"{d.from_addr} -> {d.to}: {d.amount} {d.symbol}")
     print(f"{d.fee_label}: {d.fee} {d.fee_symbol}")
     for note in d.notes:
@@ -1194,9 +1309,10 @@ def main():
          lambda ap: ap.add_argument("--feerate", type=Decimal, help="sat/vB (по умолчанию оценка сети)"))
 
     def tron_opts(ap):
-        ap.add_argument("--token", choices=["usdt", "trx"], default="usdt")
-        ap.add_argument("--fee-limit", type=Decimal, default=Decimal(40),
-                        help="макс. TRX, которые можно сжечь на энергию (TRC20)")
+        ap.add_argument("--token", default="usdt", help="usdt, trx или trc10:<ID токена>")
+        ap.add_argument("--fee-limit", type=Decimal,
+                        help="макс. TRX, которые можно сжечь на энергию (TRC20); по умолчанию 40 или оценка + 20 %%")
+        ap.add_argument("--memo", help="заметка к переводу (видна в блокчейне всем)")
     coin("tron", ["receive", "balance", "send"], "сумма, например 12.5", tron_opts)
 
     def bsc_opts(ap):
