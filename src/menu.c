@@ -9,6 +9,7 @@
 #include "hal.h"
 #include "icons.h"
 #include "oled.h"
+#include "pin.h"
 #include "storage.h"
 #include "ui.h"
 #include "ux.h"
@@ -52,7 +53,8 @@ int menu_battery_pct(void) {
 // Монеты — приложения WebAssembly (src/apps.c): главный экран — их иконки и настройки
 typedef enum { S_DASH, S_ADDR, S_SETTINGS, S_APP } state_t;
 enum { AI_RECEIVE, AI_ABOUT, AI_REMOVE, AI_BACK, AI_COUNT };  // меню приложения
-enum { SI_BRIGHT, SI_SCREEN, SI_POWER, SI_ADDRS, SI_OFFNOW, SI_BATT, SI_BLE, SI_FORGET, SI_ABOUT, SI_WIPE, SI_BACK, SI_MAX };
+enum { SI_BRIGHT, SI_SCREEN, SI_POWER, SI_ADDRS, SI_PIN, SI_PINOFF, SI_OFFNOW, SI_BATT, SI_BLE, SI_FORGET, SI_ABOUT,
+       SI_WIPE, SI_BACK, SI_MAX };
 
 static state_t st;
 static int dash_i, coin, coin_i, set_i, addr_page;
@@ -86,7 +88,8 @@ static int settings_items(int out[SI_MAX]) {
     if ((i == SI_BLE || i == SI_FORGET) && !hal_ble_available()) continue;
     if (i == SI_BATT && battery_mv() < 0 && !hal_charging()) continue;
     if ((i == SI_POWER || i == SI_OFFNOW) && !hal_power_off_available()) continue;
-    if (i == SI_WIPE && !wallet_is_unlocked()) continue;
+    if ((i == SI_WIPE || i == SI_PIN) && !wallet_is_unlocked()) continue;
+    if (i == SI_PINOFF && (!wallet_is_unlocked() || !pin_is_set())) continue;
     out[n++] = i;
   }
   return n;
@@ -151,6 +154,12 @@ static void draw_settings(void) {
       else snprintf(sub, sizeof sub, "#0 to #%d", ADDRS_N[cfg.addrs] - 1);
       ui_carousel(ICON_RECEIVE, "Addresses", sub, set_i, n);
       break;
+    case SI_PIN:
+      ui_carousel(ICON_LOCK, "PIN", pin_is_set() ? "on - hold to change" : "off - hold to set", set_i, n);
+      break;
+    case SI_PINOFF:
+      ui_carousel(ICON_LOCK, "Remove PIN", "hold to remove", set_i, n);
+      break;
     case SI_OFFNOW:
       ui_carousel(ICON_MOON, "Turn off", "button wakes it", set_i, n);
       break;
@@ -182,6 +191,10 @@ static void draw_settings(void) {
 
 void menu_draw(void) {
   oled_all_on(false);  // после диагностики экрана
+  if (app_locked()) {  // главного экрана нет, пока не введён PIN
+    app_lock_redraw();
+    return;
+  }
   char t[32];
   switch (st) {
     case S_DASH:
@@ -264,6 +277,12 @@ static void settings_hold(void) {
     case SI_ADDRS:
       cfg.addrs = (cfg.addrs + 1) % 4;
       settings_save(&cfg);
+      break;
+    case SI_PIN:
+      app_pin_setup();
+      break;
+    case SI_PINOFF:
+      app_pin_remove();
       break;
     case SI_OFFNOW:
       app_power_off();

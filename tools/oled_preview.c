@@ -60,6 +60,11 @@ int main(int argc, char **argv) {
   ui_message(ICON_CHECK, "Signed", NULL);                          save("Готово");
   ui_word("Word 3 of 12", "abandon", 2, 12);                       save("Мнемоника");
   ui_word("Word #5 is...?", "category", 1, 3);                     save("Проверка слова");
+  ui_pin("Enter PIN", 0, -1, false);                               save("PIN: начало");
+  ui_pin("Enter PIN", 2, 5, false);                                save("PIN: держу кнопку");
+  ui_pin("Enter PIN", 4, -1, true);                                save("PIN: ввести?");
+  ui_message(ICON_CROSS, "Wrong PIN", "8 attempts left");          save("PIN: неверный");
+  ui_message(ICON_LOCK, "Too many tries", "wait 20 s");            save("PIN: пауза");
   ui_carousel(ICON_SUN, "Brightness", "level 3 of 4", 0, 5);       save("Настройки: яркость");
   ui_carousel(ICON_MOON, "Sleep", "after 1 min", 1, 5);            save("Настройки: сон");
   ui_carousel(ICON_BATT, "Battery", "3.92 V  65%", 2, 8);          save("Настройки: аккумулятор");

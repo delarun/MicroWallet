@@ -155,10 +155,15 @@ def find_ports():
     return [p.device for p in list_ports.comports() if p.vid in USB_VIDS]
 
 
+LOCKED = "Устройство заблокировано — введи PIN на нём кнопкой"
+
+
 def parse_reply(resp):
     """"ok ..." -> текст после ok; "err ..." -> DeviceError."""
     if resp.startswith("ok"):
         return resp[3:]
+    if resp == "err locked":  # после включения устройство ждёт PIN
+        raise DeviceError(LOCKED)
     raise DeviceError(resp[4:] if resp.startswith("err ") else resp or "нет ответа")
 
 
@@ -679,6 +684,15 @@ class Wallet:
         self.coins = [c for c in self.info.get("coins", "").split(",") if c in COINS]
         self.chain_id = int(self.info.get("bsc_chain", 56 if self.net == "mainnet" else 97))
         self.ready = self.info.get("state") == "ready"
+        self.locked = self.info.get("state") == "locked"  # ждёт PIN на устройстве
+
+    def refresh_info(self):
+        """Перечитать info (например, после ввода PIN): монеты и состояние."""
+        self.info = self.dev.info()
+        self.coins = [c for c in self.info.get("coins", "").split(",") if c in COINS]
+        self.ready = self.info.get("state") == "ready"
+        self.locked = self.info.get("state") == "locked"
+        return self
 
     def cmd(self, coin, rest):
         """Команда монеты: "app btc addr 0 1"; у прошивок до v0.6 — встроенные "addr 0 1", "prl …"."""
@@ -689,6 +703,8 @@ class Wallet:
     # ---- общие запросы ----
 
     def need(self, coin):
+        if self.locked:
+            raise WalletError(LOCKED)
         if coin not in self.coins:
             raise WalletError(f"На устройстве нет приложения {COINS[coin]['name']} — установи его")
         if not self.ready:

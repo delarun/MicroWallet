@@ -49,6 +49,13 @@ import io.microwallet.app.core.shortAddr
 @Composable
 fun OverviewScreen(vm: AppViewModel) {
     val w = vm.wallet ?: return
+    if (vm.info["state"] == "locked") {
+        Column(Modifier.fillMaxSize().padding(16.dp)) {
+            ScreenTitle("Обзор")
+            LockedCard()
+        }
+        return
+    }
     if (!w.ready) {
         EmptyDevice(vm)
         return
@@ -185,4 +192,18 @@ private fun SkeletonRow() {
             .clip(RoundedCornerShape(14.dp))
             .background(C.card2.copy(alpha = 0.6f))
     )
+}
+
+/** Устройство ждёт PIN после включения: приложение само продолжит, как только его введут. */
+@Composable
+fun LockedCard() {
+    Card {
+        Text("Введи PIN на устройстве", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Устройство заблокировано после включения. Цифра — длительность нажатия: клик — 1, дальше +1 за " +
+                "каждые полсекунды удержания. После четырёх цифр — клик, чтобы ввести. Балансы появятся сами.",
+            color = C.muted, fontSize = 14.sp, lineHeight = 20.sp,
+        )
+    }
 }

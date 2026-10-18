@@ -27,6 +27,7 @@ void ui_field(const uint8_t *icon, const char *title, const char *value,
 void ui_amount(const uint8_t *icon, const char *title, const char *value, int idx, int count);
 void ui_progress(const uint8_t *icon, const char *title, int percent);
 // Слово мнемоники крупно
+void ui_pin(const char *title, int entered, int level, bool confirm);  // ввод PIN (pin.c)
 void ui_word(const char *title, const char *word, int idx, int count);
 void ui_splash(const char *version, const char *net);
 

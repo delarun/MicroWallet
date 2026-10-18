@@ -89,7 +89,36 @@ bool storage_save(const uint8_t *entropy, size_t len) {
   return write_file("seed.bin", b, sizeof b);
 }
 
-void storage_wipe(void) { remove(path("seed.bin")); }
+void storage_wipe(void) {
+  remove(path("seed.bin"));
+  remove(path("pin.bin"));
+}
+
+bool storage_pin_load(pin_rec_t *r) { return read_file("pin.bin", r, sizeof *r) && r->ver == 1; }
+bool storage_pin_save(const pin_rec_t *r) { return write_file("pin.bin", r, sizeof *r); }
+void storage_pin_clear(void) { remove(path("pin.bin")); }
+
+// ---------- PIN: что «набрал человек» ----------
+
+static char g_typed[8];
+static bool g_typed_init;
+
+void sim_pin_type(const char *digits) {
+  snprintf(g_typed, sizeof g_typed, "%s", digits ? digits : "");
+  g_typed_init = true;
+}
+
+bool sim_pin_typed(uint8_t d[4]) {
+  if (!g_typed_init) sim_pin_type(getenv("MW_SIM_PIN"));
+  if (strlen(g_typed) != 4) return false;
+  for (int i = 0; i < 4; i++) {
+    if (g_typed[i] < '1' || g_typed[i] > '9') return false;
+    d[i] = (uint8_t)(g_typed[i] - '0');
+  }
+  return true;
+}
+
+bool sim_no_delay(void) { return getenv("MW_SIM_NODELAY") != NULL; }
 
 void settings_load(settings_t *s) {
   settings_t t = SETTINGS_DEFAULT;

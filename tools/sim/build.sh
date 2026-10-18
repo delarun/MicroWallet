@@ -21,7 +21,7 @@ gcc -O2 -Wall -Wextra -Wno-unused-parameter -Isrc -I$TC -I$WAMR/core/iwasm/inclu
   -DUSE_PRECOMPUTED_CP=1 -DUSE_BIP39_CACHE=0 ${MW_SIM_CFLAGS} \
   tools/sim/sim_main.c tools/sim/hal_sim.c \
   src/app.c src/channel.c src/menu.c src/ux.c src/ui.c src/gfx.c src/icons.c src/oled.c \
-  src/button.c src/wallet.c src/schnorr.c src/apps.c src/sr25519_glue.c \
+  src/button.c src/pin.c src/wallet.c src/schnorr.c src/apps.c src/sr25519_glue.c \
   -w $(for f in address base58 bignum bip39 bip39_english blake256 blake2b groestl \
     hasher hmac hmac_drbg memzero pbkdf2 rfc6979 ripemd160 secp256k1 ecdsa \
     segwit_addr sha2 sha3 consteq \

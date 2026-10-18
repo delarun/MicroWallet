@@ -8,7 +8,15 @@
 
 bool storage_load(uint8_t entropy[32], size_t *len);
 bool storage_save(const uint8_t *entropy, size_t len);
-void storage_wipe(void);
+void storage_wipe(void);  // seed и PIN
+
+// PIN (src/pin.c): хеш с солью и счётчик неверных попыток подряд. Нет записи — PIN не задан.
+typedef struct {
+  uint8_t ver, fails, salt[16], hash[32];
+} pin_rec_t;
+bool storage_pin_load(pin_rec_t *r);
+bool storage_pin_save(const pin_rec_t *r);
+void storage_pin_clear(void);
 
 // Настройки интерфейса — в отдельном секторе (перед сектором seed), чтобы
 // их перезапись никогда не трогала seed.

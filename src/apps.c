@@ -634,7 +634,7 @@ static int32_t n_confirm(wasm_exec_env_t e, uint32_t t_off, uint32_t t_len) {
   st[n++] = (ux_step_t){UX_REJECT, ICON_CROSS, "Reject", "hold to cancel"};
   g_nfields = 0;
   g_ui = 1;
-  bool ok = ux_review(st, n);
+  bool ok = ux_review(st, n) && app_pin_confirm();  // после «Accept» — ещё и PIN, если задан
   g_confirmed |= ok;
   return ok;
 }
@@ -1045,7 +1045,7 @@ static void add_end(app_reply_fn reply) {
       {UX_ACCEPT, ICON_CHECK, old ? "Update" : "Install", "hold to confirm"},
       {UX_REJECT, ICON_CROSS, "Reject", "hold to cancel"},
   };
-  if (!ux_review(st, 6)) {
+  if (!ux_review(st, 6) || !app_pin_confirm()) {
     reply("err rejected");
     inst_reset();
     menu_draw();

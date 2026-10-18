@@ -81,7 +81,8 @@ fun DeviceScreen(vm: AppViewModel) {
                 else -> info["hw"] ?: "?"
             })
             InfoRow("Сеть", info["net"] ?: w.net, if (w.net == "mainnet") C.ok else C.warn)
-            InfoRow("Кошелёк", if (w.ready) "есть" else "пусто", if (w.ready) C.ok else C.warn)
+            InfoRow("Кошелёк", if (info["state"] == "locked") "заблокирован" else if (w.ready) "есть" else "пусто", if (w.ready) C.ok else C.warn)
+            info["pin"]?.let { InfoRow("PIN", if (it == "1") "включён" else "не задан", if (it == "1") C.ok else C.warn) }
             info["secure"]?.let {
                 InfoRow("Защита", if (it == "1") "Secure Boot, шифрование" else "выключена", if (it == "1") C.ok else C.warn)
             }
@@ -94,7 +95,11 @@ fun DeviceScreen(vm: AppViewModel) {
             }
         }
         Spacer(Modifier.height(14.dp))
-        if (!w.ready) {
+        val locked = info["state"] == "locked"
+        if (locked) {
+            LockedCard()
+            Spacer(Modifier.height(14.dp))
+        } else if (!w.ready) {
             Card {
                 Text("Восстановление", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(6.dp))

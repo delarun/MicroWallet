@@ -12,9 +12,12 @@ interface Device {
     fun close()
 }
 
+const val LOCKED_MSG = "Устройство заблокировано — введи PIN на нём кнопкой"
+
 /** "ok ..." -> текст после ok; "err ..." -> DeviceError. */
 fun parseReply(resp: String): String {
     if (resp.startsWith("ok")) return if (resp.length > 3) resp.substring(3) else ""
+    if (resp == "err locked") throw DeviceError(LOCKED_MSG)  // после включения устройство ждёт PIN
     throw DeviceError(if (resp.startsWith("err ")) resp.substring(4) else resp.ifEmpty { "нет ответа" })
 }
 

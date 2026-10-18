@@ -672,8 +672,14 @@ class OverviewPage(Page):
         w = self.app.wallet
         for c in self.cards.values():
             c.setVisible(bool(w))
-        self.setup.setVisible(bool(w) and not w.ready)
-        if not w:
+        locked = bool(w) and getattr(w, "locked", False)
+        self.setup.setVisible(bool(w) and not w.ready and not locked)
+        if locked:
+            self.empty.setText("Устройство заблокировано: введи PIN на нём кнопкой — обзор обновится сам.")
+            self.empty.show()
+            for c in self.cards.values():
+                c.hide()
+        elif not w:
             self.empty.setText("Подключи MicroWallet по USB или по Bluetooth (страница «Устройство») — "
                                "балансы появятся здесь.")
             self.empty.show()
@@ -1421,7 +1427,10 @@ class DevicePage(Page):
                 ("Связь", "Bluetooth, шифрованный канал" if ble_link else "USB"),
                 *([("Аккумулятор", "заряжается от USB")] if i.get("chg") == "1" else
                   [("Аккумулятор", battery_text(int(i["batt"])))] if int(i.get("batt", -1)) > 0 else []),
-                ("Кошелёк", "создан" if w.ready else "нет — создай на устройстве или восстанови"),
+                ("Кошелёк", "заблокирован — введи PIN на устройстве" if getattr(w, "locked", False) else
+                 "создан" if w.ready else "нет — создай на устройстве или восстанови"),
+                ("PIN", "включён: при включении и перед подписью" if i.get("pin") == "1" else
+                 "не задан — Settings → PIN на устройстве"),
                 ("Сети", ", ".join(CHAINS[c]["name"] for c in ORDER if c in w.coins)),
                 ("Seed", "зашифрован (Secure Boot, шифрование флеша)" if i.get("secure") == "1" else
                  "в NVS, без шифрования в обычной сборке" + (" — держи только мелкие суммы" if mainnet else ""))]
@@ -2065,8 +2074,12 @@ class App(QMainWindow):
     def set_wallet(self, w):
         self.wallet, self.conn_error = w, ""
         mainnet = w.net == "mainnet"
+        locked = getattr(w, "locked", False)
         self.dot.set(C["ok"] if w.ready else C["warn"])
-        self.st_title.setText("Подключено" if w.ready else "Нет кошелька")
+        self.st_title.setText("Введи PIN на устройстве" if locked else "Подключено" if w.ready else "Нет кошелька")
+        if locked:  # ждём ввода PIN: раз в 2 с перечитываем состояние
+            QTimer.singleShot(2000, lambda: self.wallet is w and self.run(
+                w.refresh_info, done=self.set_wallet, failed=lambda e: self.disconnected(human(e))))
         self.st_sub.setText(f"{'ДЕМО · ' if self.demo else ''}{w.net}  ·  v{w.info.get('fw', '?')}")
         if mainnet:
             self.st_sub.setStyleSheet(f"color: {C['bad']}; font-size: 12px;")

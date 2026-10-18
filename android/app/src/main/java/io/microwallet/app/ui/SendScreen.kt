@@ -198,6 +198,10 @@ private fun SendForm(vm: AppViewModel) {
             vm.run({ w.feeLevels(c) }, { if (s.coin == c) s.levels = it }, {})
     }
 
+    if (vm.info["state"] == "locked") {
+        LockedCard()
+        return
+    }
     if (!w.ready) {
         Card { Text("На устройстве нет кошелька", color = C.muted) }
         return

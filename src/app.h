@@ -24,3 +24,11 @@ void app_redraw(void);                        // перерисовать гла
 
 // Экран сопряжения по BLE: код и подтверждение кнопкой (блокирующий)
 bool app_pair_confirm(const char *code);
+
+// PIN (src/pin.c). После «Accept» подписи и установки прошивки или приложения: true — PIN
+// верный или не задан. Неверный тратит попытку; после десятой кошелёк стирается.
+bool app_pin_confirm(void);
+bool app_locked(void);    // ждёт PIN после включения: команды, кроме ping и info, — «err locked»
+void app_lock_redraw(void);  // вернуть экран PIN (после сопряжения и других всплывающих экранов)
+void app_pin_setup(void);   // Settings: поставить или сменить PIN
+void app_pin_remove(void);  // Settings: убрать PIN

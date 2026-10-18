@@ -161,7 +161,7 @@ static void begin(const char *size_s, const char *sha_s, bool z, app_reply_fn re
       {UX_ACCEPT, ICON_CHECK, "Install", "hold to update"},
       {UX_REJECT, ICON_CROSS, "Reject", "hold to cancel"},
   };
-  if (!ux_review(st, 5)) {
+  if (!ux_review(st, 5) || !app_pin_confirm()) {
     z_free();
     reply("err rejected");
     ux_flash(ICON_CROSS, "Rejected", NULL, 900);

@@ -2,7 +2,7 @@
 set(PW ${CMAKE_CURRENT_LIST_DIR}/../..)
 set(TC ${PW}/lib/trezor-crypto)
 
-set(CORE app apps channel menu ux ui gfx icons oled button wallet schnorr sr25519_glue)
+set(CORE app apps channel menu ux ui gfx icons oled button pin wallet schnorr sr25519_glue)
 list(TRANSFORM CORE PREPEND ${PW}/src/)
 list(TRANSFORM CORE APPEND .c)
 

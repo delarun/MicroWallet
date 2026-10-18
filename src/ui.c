@@ -270,6 +270,31 @@ void ui_progress(const uint8_t *icon, const char *title, int percent) {
   gfx_fill(x + 2, y + 2, (w - 4) * percent / 100, h - 4, true);
 }
 
+// Ввод PIN: заголовок, 4 клетки (набранные — залиты), под ними — шкала из 9 делений по 0.5 с
+// (пока кнопку держат) или подсказка «клик — ввести, удержание — заново»
+void ui_pin(const char *title, int entered, int level, bool confirm) {
+  gfx_clear();
+  gfx_icon_text_center(TALL ? 4 : 0, ICON_LOCK, title, GFX_BOLD);
+  const int cw = 14, gap = 8, x0 = (GFX_W - (4 * cw + 3 * gap)) / 2, y = TALL ? 18 : 10;
+  for (int i = 0; i < 4; i++) {
+    int x = x0 + i * (cw + gap);
+    gfx_fill(x, y + cw - 1, cw, 1, true);  // черта под клеткой
+    if (i < entered) gfx_round_fill(x + 3, y + 3, cw - 6, cw - 6);
+  }
+  if (confirm) {
+    gfx_text_center(TALL ? 38 : 26, "click - enter", GFX_NORMAL);
+    if (TALL) gfx_text_center(50, "hold - again", GFX_NORMAL);
+    return;
+  }
+  const int sw = 10, sg = 3, sx = (GFX_W - (9 * sw + 8 * sg)) / 2, sy = TALL ? 42 : 27;
+  for (int k = 0; k < 9; k++) {
+    int x = sx + k * (sw + sg);
+    if (k < level) gfx_fill(x, sy, sw, 7, true);
+    else gfx_fill(x, sy + 6, sw, 1, true);
+  }
+  if (TALL && level < 0) gfx_text_center(54, "longer = bigger", GFX_NORMAL);
+}
+
 void ui_word(const char *title, const char *word, int idx, int count) {
   gfx_clear();
   gfx_text_center(TALL ? 8 : 0, title, GFX_NORMAL);

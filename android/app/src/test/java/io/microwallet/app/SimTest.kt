@@ -5,8 +5,10 @@ import io.microwallet.app.ble.ChannelError
 import io.microwallet.app.ble.MemoryBondStore
 import io.microwallet.app.core.DeviceError
 import io.microwallet.app.core.Http
+import io.microwallet.app.core.LOCKED_MSG
 import io.microwallet.app.core.SendRequest
 import io.microwallet.app.core.Wallet
+import io.microwallet.app.core.WalletError
 import io.microwallet.app.core.info
 import io.microwallet.app.core.inspectApp
 import org.json.JSONObject
@@ -147,6 +149,34 @@ class SimTest {
             assertEquals(entropy, same, Wallet(dev, FakeHttp(JSONObject()), Sim.words).pearlWalletSame())
             dev.close()
         }
+    }
+
+    /** PIN: после включения устройство заблокировано — приложение видит это и ждёт ввода. */
+    @Test
+    fun locked() {
+        val dir = Sim.newDir()
+        LineDevice(Sim.start("lines", dir)).let { d ->
+            d.call("restore " + "00".repeat(16))
+            Wallet(d, FakeHttp(JSONObject()), Sim.words).let { s -> for (f in Sim.apps) s.installApp(inspectApp(f.readBytes())) { _, _ -> } }
+            d.call("simpin set 1234")
+            d.close()
+        }
+        val dev = LineDevice(Sim.start("lines", dir))
+        val w = Wallet(dev, FakeHttp(JSONObject()), Sim.words)
+        assertTrue(w.locked)
+        assertFalse(w.ready)
+        assertEquals(emptyList<String>(), w.coins)
+        assertEquals(LOCKED_MSG, assertThrows(WalletError::class.java) { w.address("tron") }.message)
+        assertEquals(LOCKED_MSG, assertThrows(DeviceError::class.java) { dev.call("fingerprint") }.message)
+        dev.call("simpin type 1234")  // «человек набрал PIN»: симулятор вводит его перед следующей командой
+        dev.call("ping")
+        assertTrue(dev.call("apps").isNotEmpty())
+        w.refreshInfo()
+        assertFalse(w.locked)
+        assertTrue(w.ready)
+        assertTrue("tron" in w.coins)
+        assertTrue(w.address("tron").startsWith("T"))
+        dev.close()
     }
 
     @Test

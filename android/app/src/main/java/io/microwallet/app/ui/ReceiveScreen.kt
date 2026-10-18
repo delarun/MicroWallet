@@ -72,7 +72,7 @@ fun ReceiveScreen(vm: AppViewModel) {
     LaunchedEffect(coin, index, w) {
         addr = null
         if (!w.ready) {
-            status = "info" to "На устройстве нет кошелька"
+            status = "info" to if (w.locked) "Введи PIN на устройстве" else "На устройстве нет кошелька"
             return@LaunchedEffect
         }
         status = "info" to ""

@@ -480,7 +480,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refresh() {
         val w = wallet ?: return
-        run({ w.refreshInfo() }, { if (wallet === w) info = it }, {})
+        val wasLocked = w.locked
+        run({ w.refreshInfo() }, {
+            if (wallet === w) {
+                info = it
+                coinsVersion++  // после ввода PIN появились приложения
+                // ждём PIN на устройстве: раз в 2 с; как только введён — загрузить балансы
+                if (w.locked) viewModelScope.launch { delay(2000); if (wallet === w) refresh() }
+                else if (wasLocked) refresh()
+            }
+        }, {})
         if (!w.ready) return
         for (c in COINS.map { it.id }.filter { it in w.coins }) {
             balances[c] = Load.Loading

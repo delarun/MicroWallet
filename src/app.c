@@ -15,7 +15,9 @@
 //   Монеты — приложения: app btc|prl|tron|bsc|eth addr|show|sign …, форматы — в начале
 //   apps/utxo/utxo.c, apps/tron/tron.c, apps/evm/evm.c.
 //   show, sign, wipe и restore ждут подтверждения на устройстве, иначе "err rejected".
-//   info: fw net state coins hw batt chg build boot heap apps apps_free addrs secure ota
+//   info: fw net state coins hw batt chg build boot heap apps apps_free addrs secure ota pin
+//   Задан PIN — после включения state=locked, и всё, кроме ping, info, boot, — "err locked"
+//   (src/pin.h), пока PIN не введён на устройстве.
 #include "app.h"
 
 #include <stdarg.h>
@@ -38,6 +40,7 @@
 #include "icons.h"
 #include "menu.h"
 #include "oled.h"
+#include "pin.h"
 #include "storage.h"
 #include "ui.h"
 #include "ux.h"
@@ -138,6 +141,7 @@ static bool quiz_word(int idx, const char *correct) {
 }
 
 static void try_unlock(void);
+static void pin_offer(void);
 
 // Пороги по аккумулятору (без USB). Ниже LOW тяжёлые операции не начинаем: запись во
 // флеш и PBKDF2 дают пик тока, и напряжение платы может провалиться. Ниже CRITICAL —
@@ -202,6 +206,7 @@ bool app_create_wallet(void) {
   }
   try_unlock();
   ux_flash(ICON_CHECK, "Wallet ready", NULL, 1200);
+  pin_offer();
   return true;
 }
 
@@ -239,6 +244,164 @@ static bool wipe_flow(void) {
 }
 
 void app_wipe(void) { wipe_flow(); }
+
+// ---------- PIN ----------
+
+static uint64_t last_input;
+
+// Пауза после нескольких ошибок: обратный отсчёт на экране (блокирующий)
+static void pin_wait(void) {
+  for (uint32_t s = pin_delay_s(); s > 0; s--) {
+    char sub[24];
+    snprintf(sub, sizeof sub, "wait %lu s", (unsigned long)s);
+    ui_message(ICON_LOCK, "Too many tries", sub);
+    oled_show();
+    hal_sleep_ms(1000);
+  }
+}
+
+static void pin_wiped(void) {
+  wallet_lock();
+  ux_flash(ICON_TRASH, "Wiped", "10 wrong PINs", 2500);
+  menu_reset();
+}
+
+// Спросить PIN (если задан): true — верный
+static bool pin_verify(const char *title) {
+  if (!pin_is_set()) return true;
+  uint8_t d[PIN_LEN];
+  int left = 0;
+  pin_wait();
+  if (!pin_prompt(title, d)) return false;
+  pin_res_t r = pin_check(d, &left);
+  memzero(d, sizeof d);
+  if (r == PIN_OK) return true;
+  if (r == PIN_WIPED) {
+    pin_wiped();
+    return false;
+  }
+  char sub[24];
+  snprintf(sub, sizeof sub, "%d attempts left", left);
+  ux_flash(ICON_CROSS, "Wrong PIN", sub, 1500);
+  return false;
+}
+
+bool app_pin_confirm(void) {
+  bool ok = pin_verify("PIN to confirm");
+  last_input = hal_time_us();
+  return ok;
+}
+
+void app_pin_setup(void) {
+  uint8_t a[PIN_LEN], b[PIN_LEN];
+  if (pin_is_set() && !pin_verify("Current PIN")) return;
+  if (!pin_prompt("New PIN", a)) return;
+  bool ok = pin_prompt("Repeat PIN", b) && !memcmp(a, b, PIN_LEN);
+  if (ok) ok = pin_set(a);
+  memzero(a, sizeof a);
+  memzero(b, sizeof b);
+  if (ok) ux_flash(ICON_CHECK, "PIN set", "asked at power-on", 1500);
+  else ux_flash(ICON_CROSS, "PIN not set", "entries differ", 1500);
+}
+
+void app_pin_remove(void) {
+  if (!pin_is_set() || !pin_verify("Current PIN")) return;
+  pin_clear();
+  ux_flash(ICON_CHECK, "PIN removed", NULL, 1200);
+}
+
+#ifndef MW_SIM
+// После создания или восстановления кошелька — предложить PIN
+static void pin_offer(void) {
+  static const ux_step_t st[] = {
+      {UX_TITLE, ICON_LOCK, "Set a PIN?", "asked at power-on"},
+      {UX_ACCEPT, ICON_CHECK, "Set PIN", "hold to set"},
+      {UX_REJECT, ICON_CROSS, "Later", "Settings > PIN"},
+  };
+  if (!pin_is_set() && ux_review(st, 3)) app_pin_setup();
+}
+#else
+static void pin_offer(void) {}  // в тестах PIN ставят командой simpin
+#endif
+
+// Экран блокировки после включения: без блокировок, из app_tick (связь при этом живёт)
+static bool g_locked, g_lock_entry_on;
+static pin_entry_t g_lock_entry;
+static uint64_t g_lock_until;
+static long g_lock_shown = -1;
+
+bool app_locked(void) { return g_locked; }
+
+void app_lock_redraw(void) {
+  g_lock_entry.dirty = true;
+  g_lock_shown = -1;
+}
+
+static void lock_start(void) {
+  g_lock_until = hal_time_us() + (uint64_t)pin_delay_s() * 1000000;
+  g_lock_entry_on = false;
+  g_lock_shown = -1;
+}
+
+// Проверить набранный PIN на экране блокировки
+static void lock_check(const uint8_t d[PIN_LEN]) {
+  int left = 0;
+  pin_res_t r = pin_check(d, &left);
+  if (r == PIN_OK) {
+    g_locked = false;
+    try_unlock();
+    menu_reset();
+    menu_draw();
+  } else if (r == PIN_WIPED) {
+    g_locked = false;
+    pin_wiped();
+    menu_draw();
+  } else {
+    char sub[24];
+    snprintf(sub, sizeof sub, "%d attempts left", left);
+    ux_flash(ICON_CROSS, "Wrong PIN", sub, 1500);
+    lock_start();
+  }
+  last_input = hal_time_us();
+}
+
+static void lock_tick(void) {
+  uint64_t now = hal_time_us();
+  if (now < g_lock_until) {
+    long s = (long)((g_lock_until - now + 999999) / 1000000);
+    if (s != g_lock_shown) {
+      char sub[24];
+      g_lock_shown = s;
+      snprintf(sub, sizeof sub, "wait %ld s", s);
+      ui_message(ICON_LOCK, "Too many tries", sub);
+      oled_show();
+    }
+    return;
+  }
+  if (!g_lock_entry_on) {
+    pin_entry_start(&g_lock_entry, "Enter PIN");
+    g_lock_entry_on = true;
+  }
+  if (btn_pressed()) last_input = now;
+  if (pin_entry_step(&g_lock_entry)) {
+    lock_check(g_lock_entry.d);
+    memzero(&g_lock_entry, sizeof g_lock_entry);
+  }
+}
+
+// Пока заблокировано — только то, что не трогает ключи
+static bool lock_allows(const char *line) {
+  static const char *const ok[] = {"ping", "info", "boot"
+#ifdef MW_SIM
+                                   , "simpin"
+#endif
+  };
+  for (size_t i = 0; i < sizeof ok / sizeof *ok; i++) {
+    size_t n = strlen(ok[i]);
+    if (!strncmp(line, ok[i], n) && (line[n] == 0 || line[n] == ' ')) return true;
+  }
+  return false;
+}
 
 // После экрана подтверждения: ответ хосту и короткое сообщение
 static void finish(const char *err) {
@@ -299,6 +462,7 @@ static void restore_flow(const char *hex) {
   try_unlock();
   reply("ok restored");
   ux_flash(ICON_CHECK, "Wallet ready", NULL, 1200);
+  pin_offer();
   menu_reset();
   menu_draw();
 }
@@ -337,12 +501,27 @@ static void handle(char *line) {
     char coins[64] = "";  // монеты — это установленные приложения
     for (int i = 0, o = 0; i < apps_count() && o < (int)sizeof coins - 10; i++)
       o += snprintf(coins + o, sizeof coins - o, "%s%s", i ? "," : "", apps_get(i)->id);
-    reply("ok fw=" FW_VERSION " net=" NET_NAME " state=%s coins=%s hw=%s batt=%d chg=%d build=%s boot=%s heap=%lu/%lu apps=%d apps_free=%d addrs=%d secure=%d ota=%s",
-           wallet_is_unlocked() ? "ready" : "empty", coins, hal_platform(), menu_battery_mv(), hal_charging(), hal_fw_build(),
+    reply("ok fw=" FW_VERSION " net=" NET_NAME " state=%s coins=%s hw=%s batt=%d chg=%d build=%s boot=%s heap=%lu/%lu apps=%d apps_free=%d addrs=%d secure=%d ota=%s pin=%d",
+           g_locked ? "locked" : wallet_is_unlocked() ? "ready" : "empty", coins, hal_platform(), menu_battery_mv(), hal_charging(), hal_fw_build(),
            hal_boot_reason(), (unsigned long)hf, (unsigned long)hl, (int)(apps_total() / 1024),
-           (int)(apps_free() / 1024), menu_addr_count(), hal_secure(), hal_ota_info());
+           (int)(apps_free() / 1024), menu_addr_count(), hal_secure(), hal_ota_info(), pin_is_set());
     return;
   }
+#ifdef MW_SIM
+  // Тесты: simpin set 1234 | off | type 1234 (что «наберёт человек») | digit <мс>
+  if (!strcmp(cmd, "simpin")) {
+    char *a2 = strtok(NULL, " ");
+    uint8_t d[PIN_LEN];
+    if (a1 && !strcmp(a1, "digit") && a2) reply("ok %d", pin_digit((uint32_t)atol(a2)));
+    else if (a1 && !strcmp(a1, "type")) { sim_pin_type(a2); reply("ok"); }
+    else if (a1 && !strcmp(a1, "off")) { pin_clear(); reply("ok"); }
+    else if (a1 && !strcmp(a1, "set") && a2) {
+      sim_pin_type(a2);
+      reply(sim_pin_typed(d) && pin_set(d) ? "ok" : "err bad pin");
+    } else reply("err usage: simpin set|type <1234> | off | digit <ms>");
+    return;
+  }
+#endif
   if (!strcmp(cmd, "fingerprint")) {  // отпечаток мастер-ключа (не секрет): для PSBT и Sparrow
     uint32_t fp;
     if (!wallet_master_fingerprint(&fp)) reply("err no wallet on device");
@@ -420,7 +599,6 @@ static void handle(char *line) {
 
 // ---------- вход для платформы ----------
 
-static uint64_t last_input;
 static bool swallow;
 
 void app_power_off(void) {
@@ -452,8 +630,15 @@ void app_init(void) {
     oled_show();
     hal_sleep_ms(hal_secure() ? 1200 : 2500);
   }
-  try_unlock();
-  menu_draw();
+  uint8_t ent[32];
+  size_t n;
+  g_locked = storage_load(ent, &n) && pin_is_set();  // кошелёк есть и задан PIN
+  memzero(ent, sizeof ent);
+  if (g_locked) lock_start();
+  else {
+    try_unlock();
+    menu_draw();
+  }
   last_input = hal_time_us();
 }
 
@@ -470,6 +655,17 @@ void app_busy(bool on) {
 }
 
 void app_line(char *line, app_reply_fn out) {
+#ifdef MW_SIM
+  // Симулятор: экран блокировки «набирает» $MW_SIM_PIN (или simpin type) перед командой
+  if (g_locked && !lock_allows(line) && hal_time_us() >= g_lock_until) {
+    uint8_t d[PIN_LEN];
+    if (sim_pin_typed(d)) lock_check(d);
+  }
+#endif
+  if (g_locked && !lock_allows(line)) {
+    out("err locked");
+    return;
+  }
   if (!g_ext || !g_ext(line, out)) {
     g_reply = out;
     handle(line);
@@ -479,9 +675,17 @@ void app_line(char *line, app_reply_fn out) {
 }
 
 void app_tick(void) {
+  uint64_t now = hal_time_us();
+  if (g_locked && !g_busy) {  // экран блокировки: кнопка — цифры PIN; экран не гаснет
+    lock_tick();
+    uint32_t poff = menu_power_off_ms();
+    if (poff && now - last_input > (uint64_t)poff * 1000 && !hal_usb_connected() && !hal_ble_connected() &&
+        !btn_pressed())
+      app_power_off();
+    return;
+  }
   // Экран погашен: первое нажатие только будит его
   btn_t b = btn_poll();
-  uint64_t now = hal_time_us();
   if (g_busy) {
     last_input = now;
     return;

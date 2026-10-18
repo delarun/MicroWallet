@@ -52,7 +52,17 @@ bool storage_save(const uint8_t *entropy, size_t len) {
   return set_blob("seed", entropy, len);
 }
 
-void storage_wipe(void) { erase("seed"); }
+void storage_wipe(void) {
+  erase("seed");
+  erase("pin");
+}
+
+bool storage_pin_load(pin_rec_t *r) {
+  size_t n = sizeof *r;
+  return get_blob("pin", r, &n) && n == sizeof *r && r->ver == 1;
+}
+bool storage_pin_save(const pin_rec_t *r) { return set_blob("pin", r, sizeof *r); }
+void storage_pin_clear(void) { erase("pin"); }
 
 void settings_load(settings_t *s) {
   settings_t t;

@@ -67,6 +67,8 @@ interface WalletApi {
     val net: String
     val coins: List<String>
     val ready: Boolean
+    /** Ждёт PIN на устройстве (после включения): ключей и монет пока нет. */
+    val locked: Boolean get() = info["state"] == "locked"
     val label: String
     val cfg: NetConfig get() = NETS.getValue(net)
     fun symbol(asset: String): String = cfg.symbol(asset)
@@ -338,11 +340,20 @@ class Wallet(
     private val addrCache = ConcurrentHashMap<String, String>()
 
     private fun need(coin: String) {
+        if (locked) throw WalletError(LOCKED_MSG)
         if (coin !in coins) throw WalletError("На устройстве нет приложения ${coinInfo(coin).name} — установи его")
         if (!ready) throw WalletError("На устройстве нет кошелька — создай его на самом устройстве")
     }
 
-    override fun refreshInfo(): Map<String, String> = dev.info().also { info = it }
+    override fun refreshInfo(): Map<String, String> {
+        val wasLocked = locked
+        info = dev.info()
+        if (wasLocked && !locked) {  // PIN введён: теперь видны приложения
+            installed = loadApps()
+            coins = coinsOf(installed)
+        }
+        return info
+    }
 
     override fun setAddrCount(n: Int) {
         if (info["addrs"] == null) throw WalletError("Нужна прошивка новее: обнови устройство")
