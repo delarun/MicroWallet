@@ -124,6 +124,25 @@ def main():
         cases.append({"coin": "btc", "dest": dest, "amount": "0.001", "feerate": "3",
                       "raw": r["raw"], "txid": r["txid"], "fee": d1.fee, "exact": True})
 
+        # ---------- Ethereum, EIP-1559 (тип 2) ----------
+        # Python-хост ETH не отправляет — эталон собран вручную по EIP-1559, как его строит
+        # Kotlin: maxFee = 2 × baseFee + чаевые; подписывает устройство (симулятор)
+        erpc = "https://ethereum-sepolia-rpc.publicnode.com"
+        base, tip = 12 * 10**9, 1_500_000_000
+        responses[f"POST {erpc} eth_getTransactionCount"] = {"jsonrpc": "2.0", "id": 1, "result": "0x9"}
+        responses[f"POST {erpc} eth_getBlockByNumber"] = {"jsonrpc": "2.0", "id": 1, "result": {"baseFeePerGas": hex(base)}}
+        responses[f"POST {erpc} eth_maxPriorityFeePerGas"] = {"jsonrpc": "2.0", "id": 1, "result": hex(tip)}
+        responses[f"POST {erpc} eth_getBalance"] = {"jsonrpc": "2.0", "id": 1, "result": hex(10**18)}
+        edest = "0x3535353535353535353535353535353535353535"
+        max_fee = 2 * base + tip
+        fields = [11155111, 9, tip, max_fee, 21000, bytes.fromhex(edest[2:]), 10**16, b"", []]
+        unsigned = b"\x02" + W.rlp(fields)
+        sig = bytes.fromhex(dev.call(f"app eth sign 0 {unsigned.hex()}"))
+        signed = b"\x02" + W.rlp(fields + [sig[64], int.from_bytes(sig[:32], "big"), int.from_bytes(sig[32:64], "big")])
+        cases.append({"coin": "eth", "asset": "eth", "dest": edest, "amount": "0.01",
+                      "raw": "0x" + signed.hex(), "txid": "0x" + W.keccak256(signed).hex(),
+                      "fee": W.fmt_units(21000 * max_fee, 18), "exact": True})
+
         # ---------- Pearl ----------
         for chain in (0, 1):
             for i in range(W.ADDRS_DEFAULT if chain == 0 else W.CHANGE_MAX):

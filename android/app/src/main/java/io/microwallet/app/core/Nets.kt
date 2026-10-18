@@ -16,10 +16,12 @@ class EvmToken(val asset: String, val symbol: String, val contract: String, val 
 class EvmChain(
     val coin: String, val rpc: String, val chainId: Long, val native: String, val txUrl: String,
     val tokens: List<EvmToken>,
+    /** Транзакции EIP-1559 (тип 2); иначе legacy EIP-155. */
+    val eip1559: Boolean = false,
 )
 
 fun NetConfig.evm(coin: String, bscChain: Long): EvmChain = if (coin == "eth")
-    EvmChain("eth", ethRpc, ethChain, eth, ethTxUrl, ethTokens)
+    EvmChain("eth", ethRpc, ethChain, eth, ethTxUrl, ethTokens, eip1559 = true)
 else
     EvmChain("bsc", bscRpc, bscChain, bnb, bscTxUrl, listOf(EvmToken("usdt", "USDT", bscUsdt, 18)))
 

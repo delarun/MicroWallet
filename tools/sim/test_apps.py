@@ -97,6 +97,15 @@ def install(sim, wasm):
     return sim.call("app add end")
 
 
+ETH_VER = next(l[8:] for l in (ROOT / "apps/eth/manifest").read_text().splitlines() if l.startswith("version="))
+
+
+def rlp_list(body):
+    """Список RLP из готового содержимого (для неканоничных случаев)."""
+    n = len(body)
+    return (bytes([0xc0 + n]) if n < 56 else bytes([0xf7 + (n.bit_length() + 7) // 8]) + n.to_bytes((n.bit_length() + 7) // 8, "big")) + body
+
+
 def put(sim, data):
     """Загрузить блок для следующей команды «… @»."""
     r = sim.call(f"app put {len(data)} {hashlib.sha256(data).hexdigest()}")
@@ -135,7 +144,7 @@ def main():
 
         # ---- установка ----
         assert install(sim, eth) == "ok"
-        assert sim.call("apps") == "ok eth|1.0|Ethereum", sim.call("apps")
+        assert sim.call("apps") == f"ok eth|{ETH_VER}|Ethereum", sim.call("apps")
         print(f"1. установка: Ethereum {len(eth)} байт, apps -> {sim.call('apps')}")
         ok += 1
 
@@ -162,6 +171,25 @@ def main():
         r = sim.call(f"app eth sign 1 {tx.hex()}")
         assert r.startswith("ok ") and recover_address(W.keccak256(tx), bytes.fromhex(r[3:])) == sim.call("app eth addr 1")[3:], r
         print("4. подпись USDC 12.5: ok")
+        ok += 1
+
+        # ---- EIP-1559 (тип 2): 0x02 || rlp([chainId, nonce, tip, maxFee, gas, to, value, data, []]) ----
+        t2 = b"\x02" + W.rlp([chain, 9, 10**9, 3 * 10**9, 21000, to, 10**16, b"", []])
+        r = sim.call(f"app eth sign 0 {t2.hex()}")
+        assert r.startswith("ok ") and recover_address(W.keccak256(t2), bytes.fromhex(r[3:])) == a0[3:], r
+        bad2 = {
+            "access list": b"\x02" + W.rlp([chain, 9, 10**9, 3 * 10**9, 21000, to, 1, b"", [[to, []]]]),
+            "tip > max fee": b"\x02" + W.rlp([chain, 9, 4 * 10**9, 3 * 10**9, 21000, to, 1, b"", []]),
+            "чужая сеть (тип 2)": b"\x02" + W.rlp([56, 9, 10**9, 3 * 10**9, 21000, to, 1, b"", []]),
+            "тип 1": b"\x01" + W.rlp([chain, 9, 10**9, 21000, to, 1, b"", []]),
+            "nonce 9 байт": W.rlp([2**70, 10**9, 21000, to, 1, b"", chain, 0, 0]),
+            "ведущий ноль": rlp_list(bytes.fromhex("820007") + b"".join(W.rlp(x) for x in [10**9, 21000, to, 1, b"", chain, 0, 0])),
+        }
+        for what, raw in bad2.items():
+            r = sim.call(f"app eth sign 0 {raw.hex()}")
+            assert r.startswith("err "), (what, r)
+        print("4a. EIP-1559 подписан (адрес совпал); отказ: access list, tip > max fee, чужая сеть, "
+              "тип 1, длинный nonce, неканоничный RLP")
         ok += 1
 
         # ---- отказы ----
@@ -240,7 +268,7 @@ def main():
         assert sim.call("apps").count("eth|") == 1
         assert sim.call("app rm evil") == "ok"
         assert sim.call("app rm blob") == "ok"
-        assert sim.call("apps") == "ok eth|1.0|Ethereum"
+        assert sim.call("apps") == f"ok eth|{ETH_VER}|Ethereum"
         sim.close()
 
         # ---- отказ на экране ----
@@ -255,7 +283,7 @@ def main():
         rej.close()
         print("8. обновление в том же слоте, удаление, отказы кнопкой, чужой хеш")
         ok += 1
-    print(f"всё прошло: {ok}/8")
+    print(f"всё прошло: {ok}/9")
 
 
 if __name__ == "__main__":

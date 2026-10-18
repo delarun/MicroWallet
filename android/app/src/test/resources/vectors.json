@@ -358,6 +358,28 @@
     "tx_count": 0
    }
   },
+  "POST https://ethereum-sepolia-rpc.publicnode.com eth_getTransactionCount": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "result": "0x9"
+  },
+  "POST https://ethereum-sepolia-rpc.publicnode.com eth_getBlockByNumber": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "result": {
+    "baseFeePerGas": "0x2cb417800"
+   }
+  },
+  "POST https://ethereum-sepolia-rpc.publicnode.com eth_maxPriorityFeePerGas": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "result": "0x59682f00"
+  },
+  "POST https://ethereum-sepolia-rpc.publicnode.com eth_getBalance": {
+   "jsonrpc": "2.0",
+   "id": 1,
+   "result": "0xde0b6b3a7640000"
+  },
   "GET https://blockbook.testnet.pearlresearch.ai/api/v2/address/tprl1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqm5v93u?details=basic": {
    "txs": 2
   },
@@ -563,11 +585,21 @@
    "exact": true
   },
   {
+   "coin": "eth",
+   "asset": "eth",
+   "dest": "0x3535353535353535353535353535353535353535",
+   "amount": "0.01",
+   "raw": "0x02f87583aa36a7098459682f008505efeb1f00825208943535353535353535353535353535353535353535872386f26fc1000080c080a0aa17a349852fa8d4b77e06f3d56fdf7228913426d36fc0f5dd45c5688f67fa63a06479d370501f5b3cc4cd375a94daad24fb6f03bfddb93634606ec3de6f9748a9",
+   "txid": "0xf97b6a80aac1291cfd847eef7ba86eb6db6b0a89a8165edd0a79999a0cc96535",
+   "fee": "0.0005355",
+   "exact": true
+  },
+  {
    "coin": "prl",
    "dest": "tprl1pyfv094rr0vk28lf8v9yx3veaacdzg26ztqk4ga84zucqqhafnn5qp0r9sv",
    "amount": "5.5",
    "feerate": "2",
-   "raw": "02000000000102b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b10000000000fdffffffb3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b30200000000fdffffff028055c820000000002251202258f2d4637b2ca3fd27614868b33dee1a242b42582d5474f51730005fa99ce8d81b2c0400000000225120d73acf6667b7850e6e00e21bb4525a2c5e2d88956a3d2c35b0bc06f4b0df01bc01400591001bc4f3ca2371a607f12fb79c487e4b7a4d046094cd17d5b05b69689bbe08bb84d491a46ed42f7ec60f29efb0b0986776c9cae7de751505635932aa0ab00140174f3dc0231315001f8df9311c5c7a38a6a07d998f94c9fc41c2b6b805dd6f52ec0cc5b4274a09ed7067e0fb293501a2de694281d2ca97e678c88d01b4e9b74b00000000",
+   "raw": "02000000000102b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b10000000000fdffffffb3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b30200000000fdffffff028055c820000000002251202258f2d4637b2ca3fd27614868b33dee1a242b42582d5474f51730005fa99ce8d81b2c0400000000225120d73acf6667b7850e6e00e21bb4525a2c5e2d88956a3d2c35b0bc06f4b0df01bc0140a18da3fb41354256327e22079dc8b3f0dd4afec1d30dd676e8e228a85755d2582fa6d869e4fe9ed942ca3c03b131247066e9fac3bf5070c3c8f07605ca2a51b6014006e24d908b06ab577863ff8072beaaae3369f494dfa73706853b6766cb2db368878d51ac4e0d5dafe5887d95b758845fcad6d1fa4c3e100ca4cbbc93e90776a300000000",
    "txid": "d76f65d4bb263d9fc5780986f23be54c7855adadc78b9bc787bb60fab0224346",
    "fee": "0.00000424",
    "exact": false,

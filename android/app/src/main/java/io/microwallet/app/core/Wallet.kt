@@ -205,7 +205,8 @@ class Wallet(
         private set
     override val ready: Boolean get() = info["state"] == "ready"
     override val label: String get() = dev.label
-    private val chainId = info["bsc_chain"]?.toLongOrNull() ?: if (net == "mainnet") 56 else 97
+    // chainId BSC — по сети сборки (как и в приложении bsc на устройстве)
+    private val chainId = if (net == "mainnet") 56L else 97L
 
     /** Команда монеты: "app btc addr 0 1"; у старых прошивок — "addr 0 1", "tron …". */
     private fun cmd(coin: String, rest: String) =
@@ -750,7 +751,11 @@ class Wallet(
         val frm = address(chain.coin, index)
         val dest20 = evmDecode(destIn.trim())
         val nonce = hexInt(rpc(chain, "eth_getTransactionCount", frm, "pending"))
-        val gasPrice = if (gasPriceIn != null) toUnits(gasPriceIn, 9) else hexInt(rpc(chain, "eth_gasPrice"))
+        val gasPrice = when {
+            gasPriceIn != null -> toUnits(gasPriceIn, 9)
+            chain.eip1559 -> BigInteger.ZERO  // считается ниже из baseFee
+            else -> hexInt(rpc(chain, "eth_gasPrice"))
+        }
 
         val token = chain.tokens.firstOrNull { it.asset == asset }
         val units = toUnits(amount, token?.decimals ?: 18)
@@ -775,30 +780,45 @@ class Wallet(
             gas = BigInteger.valueOf(21000)
             sym = chain.native
         }
-        val fee = gas.multiply(gasPrice)
+        // EIP-1559: maxFee = 2 × baseFee + чаевые (запас на рост базы); вручную — цена газа = maxFee
+        var tip = BigInteger.ZERO
+        var maxFee = gasPrice
+        if (chain.eip1559) {
+            val base = hexInt((rpc(chain, "eth_getBlockByNumber", "latest", false) as JSONObject).getString("baseFeePerGas"))
+            tip = runCatching { hexInt(rpc(chain, "eth_maxPriorityFeePerGas")) }.getOrElse { BigInteger.valueOf(1_500_000_000L) }
+            maxFee = if (gasPriceIn != null) gasPrice else base.multiply(BigInteger.valueOf(2)).add(tip)
+            if (tip > maxFee) tip = maxFee
+        }
+        val fee = gas.multiply(maxFee)
         val bal = hexInt(rpc(chain, "eth_getBalance", frm, "latest"))
         if (bal < fee + value)
             throw WalletError(
                 "Недостаточно ${chain.native}: есть ${fmtUnits(bal, 18)}, нужно ${fmtUnits(fee + value, 18)} (с комиссией)"
             )
 
-        val fields = listOf<Any>(nonce, gasPrice, gas, to, value, data)
         val cid = BigInteger.valueOf(chain.chainId)
-        val unsigned = rlp(fields + listOf(cid, 0, 0))
+        // legacy: rlp([nonce, gasPrice, gas, to, value, data, chainId, 0, 0]);
+        // тип 2: 0x02 || rlp([chainId, nonce, tip, maxFee, gas, to, value, data, []])
+        val fields = if (chain.eip1559) listOf<Any>(cid, nonce, tip, maxFee, gas, to, value, data, emptyList<Any>())
+        else listOf<Any>(nonce, gasPrice, gas, to, value, data)
+        val unsigned = if (chain.eip1559) byteArrayOf(2) + rlp(fields) else rlp(fields + listOf(cid, 0, 0))
 
         val sign = {
             val sig = dev.call(cmd(chain.coin, "sign $index ${unsigned.hex()}")).unhex()
             val r = BigInteger(1, sig.copyOfRange(0, 32))
             val s = BigInteger(1, sig.copyOfRange(32, 64))
-            val v = cid.multiply(BigInteger.valueOf(2)).add(BigInteger.valueOf(35L + sig[64]))
-            val signed = rlp(fields + listOf(v, r, s))
+            val signed = if (chain.eip1559) byteArrayOf(2) + rlp(fields + listOf(sig[64].toInt(), r, s))
+            else rlp(fields + listOf(cid.multiply(BigInteger.valueOf(2)).add(BigInteger.valueOf(35L + sig[64])), r, s))
             "0x" + signed.hex() to "0x" + keccak256(signed).hex()
         }
         val broadcast = { rawHex: String -> rpc(chain, "eth_sendRawTransaction", rawHex); Unit }
         return Draft(
             chain.coin, asset, sym, frm, evmChecksum(dest20), fmtUnits(units, token?.decimals ?: 18), fmtUnits(fee, 18),
             chain.native, feeLabel = "Макс. комиссия",
-            notes = listOf("nonce $nonce, gas $gas × ${fmtUnits(gasPrice, 9)} gwei"),
+            notes = listOf(
+                if (chain.eip1559) "EIP-1559: nonce $nonce, gas $gas × до ${fmtUnits(maxFee, 9)} gwei (чаевые ${fmtUnits(tip, 9)})"
+                else "nonce $nonce, gas $gas × ${fmtUnits(gasPrice, 9)} gwei"
+            ),
             sign = sign, broadcast = broadcast, txUrl = chain.txUrl,
         )
     }
