@@ -514,3 +514,9 @@ BSC и ETH: `app bsc|eth addr|show <i>`, `app bsc|eth sign <i> <rlp hex>`;
 6. BSC: только legacy-транзакции, nonce и цену газа сообщает хост.
 7. Pearl: только key-path Taproot, не больше 16 входов; своих P2MR/XMSS-ключей нет.
 8. Приложение с бесконечным циклом подвесит устройство до перезагрузки: лимита на число инструкций пока нет.
+
+## Лицензия
+
+[Apache License 2.0](LICENSE). Сторонние библиотеки (скачиваются в `lib/` через `get_deps.sh`)
+идут под своими лицензиями: trezor-crypto — MIT, WAMR — Apache-2.0 WITH LLVM-exception,
+sr25519-donna — Apache-2.0. Шрифт X11 misc-fixed 6×10 — общественное достояние.
