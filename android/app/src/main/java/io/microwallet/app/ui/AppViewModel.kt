@@ -21,6 +21,7 @@ import io.microwallet.app.core.DemoWallet
 import io.microwallet.app.core.DeviceError
 import io.microwallet.app.core.AppUpdate
 import io.microwallet.app.core.Trace
+import io.microwallet.app.core.fmtUnits
 import io.microwallet.app.core.UrlHttp
 import io.microwallet.app.core.downloadAppUpdate
 import io.microwallet.app.core.findAppUpdate
@@ -510,6 +511,80 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         showRestore = false
         message = "Кошелёк восстановлен"
         refresh()
+    }
+
+    // ---------------- PSBT (Sparrow, Electrum) ----------------
+
+    /** PSBT: загружен (data, описание) -> подписывается -> подписан (signed, raw) -> отправлен (txid). */
+    class PsbtState {
+        var data by mutableStateOf<ByteArray?>(null)
+        var summary by mutableStateOf("")
+        var phase by mutableStateOf("")  // "", "loaded", "signing", "signed", "sending", "sent", "error"
+        var signed by mutableStateOf("")
+        var raw by mutableStateOf<String?>(null)
+        var txid by mutableStateOf("")
+        var error by mutableStateOf("")
+        var descriptor by mutableStateOf<String?>(null)
+
+        fun reset() {
+            data = null; summary = ""; phase = ""; signed = ""; raw = null; txid = ""; error = ""
+        }
+    }
+    val psbt = PsbtState()
+
+    fun psbtLoad(bytes: ByteArray?) {
+        psbt.reset()
+        if (bytes == null || bytes.isEmpty()) {
+            message = "Пусто: скопируй PSBT (base64) в Sparrow или выбери файл .psbt"
+            return
+        }
+        try {
+            val p = io.microwallet.app.core.Psbt.parse(bytes)
+            val sum = p.tx.outs.sumOf { it.value }
+            psbt.data = bytes
+            psbt.summary = "${p.tx.ins.size} вход(ов), ${p.tx.outs.size} выход(ов), на выходах ${fmtUnits(java.math.BigInteger.valueOf(sum), 8)} BTC"
+            psbt.phase = "loaded"
+        } catch (e: Exception) {
+            psbt.phase = "error"
+            psbt.error = human(e)
+        }
+    }
+
+    fun psbtSign(send: Boolean) {
+        val w = wallet ?: return
+        val d = psbt.data ?: return
+        psbt.phase = "signing"
+        busy = true
+        run({ w.signPsbt(d, finalize = send) }, { (signed, raw) ->
+            busy = false
+            psbt.signed = signed
+            psbt.raw = raw
+            psbt.phase = "signed"
+            if (send && raw != null) psbtBroadcast()
+        }, {
+            busy = false
+            psbt.phase = "error"
+            psbt.error = it
+        })
+    }
+
+    fun psbtBroadcast() {
+        val w = wallet ?: return
+        val raw = psbt.raw ?: return
+        psbt.phase = "sending"
+        run({ w.broadcastBtc(raw) }, {
+            psbt.txid = it
+            psbt.phase = "sent"
+            refreshSoon()
+        }, {
+            psbt.phase = "error"
+            psbt.error = "Подписано, но сеть не приняла: $it"
+        })
+    }
+
+    fun loadDescriptor() {
+        val w = wallet ?: return
+        run({ w.descriptor() }, { psbt.descriptor = it })
     }
 
     // ---------------- обновление самого приложения ----------------

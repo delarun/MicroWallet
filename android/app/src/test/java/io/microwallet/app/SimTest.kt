@@ -112,6 +112,29 @@ class SimTest {
 
     /** Те же транзакции, что собрал и подписал host/wallet.py, — байт в байт. */
     @Test
+    fun psbt() {
+        // PSBT строит embit, эталон подписи — Python-хост (tools/sim/gen_psbt_vectors.py)
+        val v = JSONObject(javaClass.getResource("/psbt.json")!!.readText())
+        val dir = Sim.newDir()
+        val dev = LineDevice(Sim.start("lines", dir))
+        dev.call("restore " + "00".repeat(16))
+        val responses = JSONObject()
+        val prev = v.getJSONObject("prev")
+        val api = io.microwallet.app.core.NETS.getValue("testnet").btcApi
+        for (txid in prev.keys()) responses.put("TEXT $api/tx/$txid/hex", prev.getString(txid))
+        val w = Wallet(dev, FakeHttp(responses), Sim.words)
+        for (f in Sim.apps) w.installApp(inspectApp(f.readBytes())) { _, _ -> }
+        val psbt = v.getString("psbt").toByteArray()
+        assertEquals("подпись", v.getString("signed"), w.signPsbt(psbt).first)
+        val (fin, raw) = w.signPsbt(psbt, finalize = true)
+        assertEquals("финализация", v.getString("signed_final"), fin)
+        assertEquals("транзакция", v.getString("raw"), raw)
+        assertEquals("только witness_utxo", v.getString("signed_wonly"), w.signPsbt(v.getString("psbt_wonly").toByteArray()).first)
+        assertEquals("дескриптор", v.getString("descriptor"), w.descriptor())
+        dev.close()
+    }
+
+    @Test
     fun vectors() {
         val dir = Sim.newDir()
         val dev = LineDevice(Sim.start("lines", dir))

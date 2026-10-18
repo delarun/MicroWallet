@@ -1280,7 +1280,8 @@ def main():
         else:
             w = Wallet(dev)
             if w.net == "mainnet":
-                print("!! MAINNET: настоящие деньги, seed на устройстве не зашифрован !!")
+                print("!! MAINNET: настоящие деньги" + ("" if w.info.get("secure") == "1"
+                      else ", seed на устройстве не зашифрован") + " !!", file=sys.stderr)
             if a.action == "xpub":
                 print(dev.call(w.cmd("btc", "xpub")))
             elif a.action == "descriptor":

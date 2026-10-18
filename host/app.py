@@ -1300,6 +1300,25 @@ class DevicePage(Page):
         iv.addLayout(acts)
         grid.addWidget(info)
 
+        # ---- Bitcoin: PSBT (Sparrow, Electrum) ----
+        pc = card()
+        pv = QVBoxLayout(pc)
+        pv.setContentsMargins(24, 18, 24, 18)
+        pv.addWidget(label("Bitcoin: PSBT и Sparrow", "h2"))
+        pv.addWidget(label("Кошелёк ведёт Sparrow или Electrum (watch-only), подписывает устройство: "
+                           "получателей, сдачу и суммы входов оно проверяет само.", "muted", wrap=True))
+        pr = QHBoxLayout()
+        self.desc_btn = button("Для Sparrow…", None, line_icon("copy"))
+        self.desc_btn.setToolTip("Дескриптор watch-only кошелька: Sparrow → File → New Wallet → Watch Only")
+        self.desc_btn.clicked.connect(self.do_descriptor)
+        self.psbt_btn = button("Подписать PSBT…", "primary")
+        self.psbt_btn.clicked.connect(self.do_psbt)
+        pr.addWidget(self.desc_btn)
+        pr.addWidget(self.psbt_btn)
+        pr.addStretch()
+        pv.addLayout(pr)
+        grid.addWidget(pc)
+
         logc = card()
         lv = QVBoxLayout(logc)
         lv.setContentsMargins(20, 18, 20, 18)
@@ -1332,7 +1351,7 @@ class DevicePage(Page):
         if not w:
             self.sub.setText(self.app.conn_error or "не подключено")
             self.net_badge.clear()
-            for b in (self.boot, self.wipe, self.update_btn):
+            for b in (self.boot, self.wipe, self.update_btn, self.desc_btn, self.psbt_btn):
                 b.setEnabled(False)
             return
         i = w.info
@@ -1351,7 +1370,8 @@ class DevicePage(Page):
                   [("Аккумулятор", battery_text(int(i["batt"])))] if int(i.get("batt", -1)) > 0 else []),
                 ("Кошелёк", "создан" if w.ready else "нет — создай на устройстве или восстанови"),
                 ("Сети", ", ".join(CHAINS[c]["name"] for c in ORDER if c in w.coins)),
-                ("Seed", "в NVS, без шифрования в обычной сборке" + (" — держи только мелкие суммы" if mainnet else ""))]
+                ("Seed", "зашифрован (Secure Boot, шифрование флеша)" if i.get("secure") == "1" else
+                 "в NVS, без шифрования в обычной сборке" + (" — держи только мелкие суммы" if mainnet else ""))]
         for r, (k, v) in enumerate(rows):
             self.kv.addWidget(label(k, "muted"), r, 0)
             self.kv.addWidget(label(v, wrap=True), r, 1)
@@ -1359,6 +1379,9 @@ class DevicePage(Page):
         self.boot.setEnabled(real and not ble_link)
         self.wipe.setEnabled(real)
         self.update_btn.setEnabled(real and hw.startswith("esp32"))
+        psbt_ok = real and getattr(w, "ready", False) and "btc" in getattr(w, "coins", [])
+        self.desc_btn.setEnabled(psbt_ok)
+        self.psbt_btn.setEnabled(psbt_ok)
 
     def do_boot(self):
         self.app.run(self.app.wallet.dev.call, "boot", done=lambda _: self.app.disconnected(
@@ -1372,6 +1395,65 @@ class DevicePage(Page):
                 UpdateDialog(self.app, path).exec()
             except OSError as e:
                 self.app.toast(f"Не удалось прочитать файл: {e}")
+
+    def do_descriptor(self):
+        w = self.app.wallet
+
+        def done(desc):
+            d = Dialog(self.app, "Watch-only кошелёк для Sparrow",
+                       "Sparrow: File → New Wallet → Watch Only → Output Descriptor — вставь строку. "
+                       "Electrum: Standard wallet → Use a master key → zpub/vpub (wallet.py btc xpub).")
+            t = label(desc, "mono", wrap=True, sel=True)
+            d.v.addWidget(t)
+            row = QHBoxLayout()
+            cp = button("Скопировать", "primary", line_icon("copy", "white"))
+            cp.clicked.connect(lambda: (self.app.copy(desc, "Дескриптор скопирован"), d.accept()))
+            row.addStretch()
+            row.addWidget(cp)
+            d.v.addLayout(row)
+            d.setMinimumWidth(640)
+            d.exec()
+        self.app.run(w.descriptor, done=done, failed=lambda e: self.app.toast(human(e)))
+
+    def do_psbt(self):
+        path, _ = QFileDialog.getOpenFileName(self, "PSBT из Sparrow/Electrum", str(Path.home()),
+                                              "PSBT (*.psbt *.txt);;Все файлы (*)")
+        if not path:
+            return
+        try:
+            data = Path(path).read_bytes()
+        except OSError as e:
+            self.app.toast(f"Не удалось прочитать файл: {e}")
+            return
+        m = QMessageBox(self)
+        m.setWindowTitle("Подписать PSBT")
+        m.setText("Устройство покажет получателей, суммы и комиссию — сверь их с Sparrow и удерживай «Accept».\n\n"
+                  "Сразу собрать готовую транзакцию и отправить её в сеть — или только подписать PSBT "
+                  "(отправишь из Sparrow)?")
+        only = m.addButton("Только подписать", QMessageBox.AcceptRole)
+        send = m.addButton("Подписать и отправить", QMessageBox.DestructiveRole)
+        m.addButton("Отмена", QMessageBox.RejectRole)
+        m.exec()
+        if m.clickedButton() not in (only, send):
+            return
+        broadcast = m.clickedButton() is send
+        w = self.app.wallet
+
+        def job():
+            signed, raw = w.sign_psbt(data, finalize=broadcast)
+            txid = W.post_raw(w.cfg["btc_api"] + "/tx", raw) if broadcast else None
+            return signed, txid
+
+        def done(res):
+            signed, txid = res
+            out, _ = QFileDialog.getSaveFileName(self, "Сохранить подписанный PSBT",
+                                                 str(Path(path).with_suffix(".signed.psbt")), "PSBT (*.psbt)")
+            if out:
+                Path(out).write_text(signed + "\n")
+            self.add_log(f"PSBT подписан{' и отправлен, txid ' + txid if txid else ''}")
+            self.app.toast("Отправлено: " + txid if txid else "PSBT подписан" + (" и сохранён" if out else ""))
+        self.app.toast("Подтверди на устройстве: сверь получателей и комиссию, удерживай «Accept»")
+        self.app.run(job, done=done, failed=lambda e: self.app.toast(human(e)))
 
     def do_wipe(self):
         m = QMessageBox(self)

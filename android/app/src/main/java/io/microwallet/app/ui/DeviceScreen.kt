@@ -151,6 +151,10 @@ fun DeviceScreen(vm: AppViewModel) {
             }
             Spacer(Modifier.height(14.dp))
         }
+        if (w.ready && "btc" in vm.coins && !vm.isDemo) {
+            PsbtCard(vm)
+            Spacer(Modifier.height(14.dp))
+        }
         AppUpdateCard(vm)
         Spacer(Modifier.height(14.dp))
         Card {

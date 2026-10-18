@@ -388,7 +388,11 @@ python host/wallet.py btc descriptor          # wpkh([отпечаток/84h/1h/
 python host/wallet.py btc psbt-sign tx.psbt -o signed.psbt   # подписать PSBT из Sparrow
 python host/wallet.py btc psbt-sign tx.psbt --broadcast      # и сразу собрать и отправить
 ```
-PSBT разбирает хост (`host/psbt.py`, BIP174 v0) и переводит в обычный запрос устройства — для
+То же — в приложении для ПК (Устройство → «Bitcoin: PSBT и Sparrow»: «Для Sparrow…», «Подписать PSBT…»)
+и на телефоне (Устройство → карточка PSBT: дескриптор, PSBT из файла или буфера, «Подписать» или
+«Подписать и отправить», затем «Поделиться» / «Скопировать» / «Сохранить файл»).
+
+PSBT разбирает хост (`host/psbt.py`, `android/…/core/Psbt.kt`, BIP174 v0) и переводит в обычный запрос устройства — для
 денег это не опаснее: получателей устройство показывает само, адрес сдачи (по `bip32_derivation`
 выхода) выводит само, суммы входов проверяет по предыдущим транзакциям (`non_witness_utxo`
 или скачивает), подписывает только SIGHASH_ALL. Только свои P2WPKH-входы m/84'/c'/0'/…;

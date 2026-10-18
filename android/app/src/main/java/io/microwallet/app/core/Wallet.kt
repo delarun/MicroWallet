@@ -89,6 +89,13 @@ interface WalletApi {
     fun removeApp(id: String) {
         throw WalletError("Приложения недоступны")
     }
+    /** Watch-only кошелёк для Sparrow/Electrum: дескриптор wpkh с отпечатком, путём и xpub (BIP380). */
+    fun descriptor(): String = throw WalletError("Нужно устройство с приложением Bitcoin")
+    /** PSBT (двоичный или base64) -> (подписанный PSBT base64, сырая транзакция при finalize). */
+    fun signPsbt(data: ByteArray, finalize: Boolean = false): Pair<String, String?> =
+        throw WalletError("Нужно устройство с приложением Bitcoin")
+    /** Отправить готовую BTC-транзакцию -> txid. */
+    fun broadcastBtc(raw: String): String = throw WalletError("Нужно устройство с приложением Bitcoin")
     /** Порядок приложений на главном экране устройства (прошивки с v0.7). */
     fun setAppOrder(ids: List<String>) {
         throw WalletError("Приложения недоступны")
@@ -239,6 +246,65 @@ class Wallet(
         dev.call("app rm $id")
         addrCache.keys.removeAll { it.startsWith("$id/") }
         apps()
+    }
+
+    // ---- PSBT (Sparrow, Electrum): то же, что host/wallet.py sign_psbt ----
+
+    override fun descriptor(): String {
+        need("btc")
+        val c = if (net == "mainnet") 0 else 1
+        val x = plainXpub(dev.call(cmd("btc", "xpub")))
+        return descsum("wpkh([${dev.call("fingerprint")}/84h/${c}h/0h]$x/<0;1>/*)")
+    }
+
+    override fun broadcastBtc(raw: String): String = http.postRaw(cfg.btcApi + "/tx", raw).trim()
+
+    /**
+     * Кошелёк лишь переводит PSBT в запрос устройства: получателей, сдачу (её адрес устройство
+     * выводит само) и суммы входов (по предыдущим транзакциям) проверяет устройство.
+     * Входы — только свои P2WPKH m/84'/c'/0'/{0,1}/i, только SIGHASH_ALL.
+     */
+    override fun signPsbt(data: ByteArray, finalize: Boolean): Pair<String, String?> {
+        need("btc")
+        val p = Psbt.parse(data)
+        val fp = dev.call("fingerprint")
+        val c = if (net == "mainnet") 0L else 1L
+        val acct = listOf(84L or Psbt.HARD, c or Psbt.HARD, Psbt.HARD)
+        fun ours(m: List<PsbtKv>, type: Int) = Psbt.derivations(m, type).firstOrNull { (_, f, path) ->
+            f == fp && path.size == 5 && path.subList(0, 3) == acct && path[3] in 0L..1L
+        }
+        val ins = ArrayList<TxIn>()
+        val prev = ArrayList<ByteArray>()
+        val pubs = ArrayList<ByteArray>()
+        p.tx.ins.forEachIndexed { k, ti ->
+            val m = p.inputs[k]
+            val d = ours(m, Psbt.I_BIP32_DERIVATION) ?: throw WalletError(
+                "Вход #$k не из этого кошелька: нет пути m/84'/$c'/0'/… с отпечатком $fp (мультиподпись и чужие входы не поддерживаются)")
+            Psbt.get(m, Psbt.I_SIGHASH_TYPE)?.let { st ->
+                if (st.size != 4 || st[0] != 1.toByte() || st[1] != 0.toByte() || st[2] != 0.toByte() || st[3] != 0.toByte())
+                    throw WalletError("Вход #$k: устройство подписывает только SIGHASH_ALL")
+            }
+            val pt = PsbtTx.parse(Psbt.get(m, Psbt.I_NON_WITNESS_UTXO) ?: prevTx(ti.txid))
+            if (pt.txid != ti.txid || ti.vout >= pt.outs.size) throw WalletError("Вход #$k: предыдущая транзакция в PSBT не та")
+            ins.add(TxIn(ti.txid, ti.vout.toInt(), pt.outs[ti.vout.toInt()].value, d.third[3].toInt(), d.third[4].toInt(), ti.sequence))
+            prev.add(PsbtTx(pt.version, pt.ins, pt.outs, pt.locktime).serialize(false))  // без witness: txid тот же
+            pubs.add(d.first)
+        }
+        val outs = p.tx.outs.mapIndexed { k, o ->
+            val d = ours(p.outputs[k], Psbt.O_BIP32_DERIVATION)
+            if (d != null && d.third[3] == 1L) TxOut(o.value, o.script, true, d.third[4].toInt())  // сдачу сверит устройство
+            else TxOut(o.value, o.script, false)
+        }
+        val tx = UtxoTx(ins = ins, outs = outs, version = p.tx.version.toLong(), locktime = p.tx.locktime)
+        val parts = dev.appCall(cmd("btc", "sign"), signBlob(tx, prev)).split(' ').filter { it.isNotEmpty() }
+        if (parts.size != ins.size) throw WalletError("Устройство вернуло не столько подписей, сколько входов")
+        parts.forEachIndexed { k, part ->
+            val (sig, pub) = part.split(':').map { it.unhex() }
+            if (!pub.contentEquals(pubs[k])) throw WalletError("Вход #$k: устройство подписало другим ключом")
+            p.setPartialSig(k, pub, sig)
+        }
+        val raw = if (finalize) p.finalizeP2wpkh() else null
+        return p.toBase64() to raw
     }
 
     override fun setAppOrder(ids: List<String>) {
