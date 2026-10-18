@@ -59,6 +59,8 @@ from typing import Callable
 import serial
 from serial.tools import list_ports
 
+import psbt  # PSBT для Sparrow/Electrum (host/psbt.py)
+
 NETS = {
     "testnet": {
         "btc": "tBTC",
@@ -664,7 +666,9 @@ class Wallet:
                 lines = ["ota b64 " + base64.b64encode(z[o:o + 2048]).decode() for o in range(0, len(z), 2048)]
                 step = len(image) / len(lines)
                 if hasattr(self.dev, "stream"):
-                    self.dev.stream(lines, 4, (lambda k: progress(min(len(image), int(k * step)), len(image)))
+                    # конвейер — только по USB: по Bluetooth обновление с ним вставало на 1%
+                    window = 4 if isinstance(self.dev, Device) else 1
+                    self.dev.stream(lines, window, (lambda k: progress(min(len(image), int(k * step)), len(image)))
                                     if progress else None)
                 else:
                     for k, line in enumerate(lines, 1):
@@ -775,6 +779,71 @@ class Wallet:
                 "broadcast": broadcast}
 
     # ================= BTC и Pearl =================
+
+    # ================= PSBT (Sparrow, Electrum) =================
+
+    def fingerprint(self):
+        """Отпечаток мастер-ключа устройства (8 hex)."""
+        return self.dev.call("fingerprint")
+
+    def descriptor(self):
+        """Watch-only кошелёк для Sparrow/Electrum: wpkh([fp/84h/c'h/0h]xpub/<0;1>/*)#…"""
+        c = 0 if self.net == "mainnet" else 1
+        x = psbt.plain_xpub(self.dev.call(self.cmd("btc", "xpub")))
+        return psbt.descsum(f"wpkh([{self.fingerprint()}/84h/{c}h/0h]{x}/<0;1>/*)")
+
+    def sign_psbt(self, data, finalize=False):
+        """PSBT (base64 или двоичный) -> (подписанный PSBT в base64, сырая транзакция при finalize).
+        Хост лишь переводит PSBT в запрос устройства: получателей, сдачу (её адрес устройство
+        выводит само) и суммы входов (по предыдущим транзакциям) проверяет устройство.
+        Входы — только свои P2WPKH m/84'/c'/0'/{0,1}/i, только SIGHASH_ALL."""
+        p = psbt.Psbt.parse(data)
+        fp = self.fingerprint()
+        c = 0 if self.net == "mainnet" else 1
+        acct = [84 | psbt.HARD, c | psbt.HARD, psbt.HARD]
+
+        def ours(m, key_type):
+            for pub, f, path in psbt.derivations(m, key_type):
+                if f == fp and len(path) == 5 and path[:3] == acct and path[3] in (0, 1):
+                    return pub, path[3], path[4]
+            return None
+
+        ins, prev, pubs = [], [], []
+        for k, (ti, m) in enumerate(zip(p.tx["ins"], p.inputs)):
+            d = ours(m, psbt.I_BIP32_DERIVATION)
+            if not d:
+                raise WalletError(f"Вход #{k} не из этого кошелька: нет пути m/84'/{c}'/0'/… "
+                                  f"с отпечатком {fp} (мультиподпись и чужие входы не поддерживаются)")
+            st = psbt.get(m, psbt.I_SIGHASH_TYPE)
+            if st is not None and struct.unpack("<I", st)[0] != 1:
+                raise WalletError(f"Вход #{k}: устройство подписывает только SIGHASH_ALL")
+            raw = psbt.get(m, psbt.I_NON_WITNESS_UTXO) or self._prev_tx(ti["txid"])
+            pt = psbt.parse_tx(raw)
+            if pt["txid"] != ti["txid"] or ti["vout"] >= len(pt["outs"]):
+                raise WalletError(f"Вход #{k}: предыдущая транзакция в PSBT не та")
+            ins.append({"txid": ti["txid"], "vout": ti["vout"], "value": pt["outs"][ti["vout"]]["value"],
+                        "chain": d[1], "index": d[2], "sequence": ti["sequence"]})
+            prev.append(psbt.ser_tx(pt, False))  # без witness: txid тот же, данных меньше
+            pubs.append(d[0])
+        outs = []
+        for to, m in zip(p.tx["outs"], p.outputs):
+            d = ours(m, psbt.O_BIP32_DERIVATION)
+            if d and d[1] == 1:  # сдача: устройство само выведет адрес и сверит
+                outs.append({"value": to["value"], "script": to["script"], "change": True, "change_index": d[2]})
+            else:
+                outs.append({"value": to["value"], "script": to["script"], "change": False})
+        tx = {"version": p.tx["version"], "locktime": p.tx["locktime"], "ins": ins, "outs": outs}
+        parts = app_call(self.dev, self.cmd("btc", "sign"), sign_blob(tx, prev)).split()
+        if len(parts) != len(ins):
+            raise WalletError("Устройство вернуло не столько подписей, сколько входов")
+        for k, part in enumerate(parts):
+            sig, pub = (bytes.fromhex(x) for x in part.split(":"))
+            if pub != pubs[k]:
+                raise WalletError(f"Вход #{k}: устройство подписало другим ключом")
+            key = bytes([psbt.I_PARTIAL_SIG]) + pub
+            p.inputs[k] = [(kk, v) for kk, v in p.inputs[k] if kk != key] + [(key, sig)]
+        raw = p.finalize_p2wpkh() if finalize else None
+        return p.to_base64(), raw
 
     def _prev_tx(self, txid):
         """Предыдущая транзакция целиком (сырые байты) — с кэшем: она не меняется."""
@@ -1108,15 +1177,20 @@ def main():
         cs = cp.add_subparsers(dest="action", required=True)
         for act in actions:
             ap = cs.add_parser(act)
-            if act != "xpub":
+            if act not in ("xpub", "descriptor", "psbt-sign"):
                 ap.add_argument("-i", "--index", type=int, default=0, help="номер адреса")
+            if act == "psbt-sign":
+                ap.add_argument("psbt", help="файл PSBT (двоичный или base64), - — из stdin")
+                ap.add_argument("-o", "--out", help="куда записать подписанный PSBT (по умолчанию — в stdout)")
+                ap.add_argument("--finalize", action="store_true", help="собрать готовую транзакцию")
+                ap.add_argument("--broadcast", action="store_true", help="и отправить её в сеть")
             if act == "send":
                 ap.add_argument("address")
                 ap.add_argument("amount", help=amount_help)
                 ap.add_argument("--dry-run", action="store_true")
                 extra(ap)
 
-    coin("btc", ["receive", "balance", "xpub", "send"], "сумма в сатоши",
+    coin("btc", ["receive", "balance", "xpub", "send", "descriptor", "psbt-sign"], "сумма в сатоши",
          lambda ap: ap.add_argument("--feerate", type=Decimal, help="sat/vB (по умолчанию оценка сети)"))
 
     def tron_opts(ap):
@@ -1209,6 +1283,22 @@ def main():
                 print("!! MAINNET: настоящие деньги, seed на устройстве не зашифрован !!")
             if a.action == "xpub":
                 print(dev.call(w.cmd("btc", "xpub")))
+            elif a.action == "descriptor":
+                print(w.descriptor())
+                print("Sparrow: File → New Wallet → Watch Only → Output Descriptor; "
+                      "Electrum: Standard wallet → Use a master key (zpub/vpub из «btc xpub»).", file=sys.stderr)
+            elif a.action == "psbt-sign":
+                data = sys.stdin.buffer.read() if a.psbt == "-" else Path(a.psbt).read_bytes()
+                print("Сверь получателей, суммы и комиссию на экране и удерживай «Accept»…", file=sys.stderr)
+                signed, raw = w.sign_psbt(data, finalize=a.finalize or a.broadcast)
+                if a.out:
+                    Path(a.out).write_text(signed + "\n")
+                else:
+                    print(signed)
+                if raw:
+                    print(f"транзакция: {raw}", file=sys.stderr)
+                if a.broadcast:
+                    print("txid:", post_raw(w.cfg["btc_api"] + "/tx", raw), file=sys.stderr)
             elif a.action == "receive":
                 print("Сверь адрес с экраном устройства и подтверди удержанием на «Approve».")
                 print(w.show_address(a.cmd, a.index))

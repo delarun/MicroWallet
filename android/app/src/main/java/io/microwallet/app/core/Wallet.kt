@@ -319,7 +319,9 @@ class Wallet(
             try {
                 val enc = java.util.Base64.getEncoder()
                 val lines = (z.indices step 2048).map { "ota b64 " + enc.encodeToString(z.copyOfRange(it, minOf(it + 2048, z.size))) }
-                dev.stream(lines, 4) { k -> onProgress(minOf(image.size, (k.toLong() * image.size / lines.size).toInt()), image.size) }
+                // По Bluetooth — по одному куску с ответом: с конвейером обновление вставало на 1%
+                // (данные приходили, пока плата пишет флеш). Сжатие даёт своё и так.
+                dev.stream(lines, 1) { k -> onProgress(minOf(image.size, (k.toLong() * image.size / lines.size).toInt()), image.size) }
             } catch (e: Exception) {
                 runCatching { dev.call("ota abort") }
                 throw e

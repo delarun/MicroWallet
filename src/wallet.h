@@ -12,6 +12,8 @@ bool wallet_unlock(const uint8_t *entropy, size_t len,
                    void (*progress)(uint32_t cur, uint32_t total));
 void wallet_lock(void);
 bool wallet_is_unlocked(void);
+// Отпечаток мастер-ключа (BIP32: первые 4 байта hash160 ключа m) — для PSBT и дескрипторов
+bool wallet_master_fingerprint(uint32_t *fp);
 
 // Ключ по пути: path[i] | 0x80000000 — hardened. pub65 — несжатый (04 || x || y).
 // Любой из выходов может быть NULL.

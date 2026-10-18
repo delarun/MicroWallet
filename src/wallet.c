@@ -62,6 +62,12 @@ static uint32_t fingerprint(const uint8_t pub[33]) {
          ((uint32_t)h[2] << 8) | h[3];
 }
 
+bool wallet_master_fingerprint(uint32_t *fp) {
+  if (!g_unlocked) return false;
+  *fp = fingerprint(g_master.pub);
+  return true;
+}
+
 static bool node_from_seed(const uint8_t seed[64], hdnode_t *n) {
   uint8_t I[64];
   bignum256 k;

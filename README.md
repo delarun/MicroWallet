@@ -380,6 +380,21 @@ python host/wallet.py prl balance                             # показыва
 python host/wallet.py prl send prl1p... 12.5 --feerate 2      # grain/vB, по умолчанию оценка сети
 ```
 
+**PSBT — Sparrow, Electrum.** Устройство остаётся «подписывающим», кошелёк ведёт Sparrow:
+```sh
+python host/wallet.py btc descriptor          # wpkh([отпечаток/84h/1h/0h]tpub…/<0;1>/*)#…
+#   Sparrow: File → New Wallet → Watch Only → Output Descriptor (вставить строку)
+#   Electrum: Standard wallet → Use a master key → zpub/vpub из «btc xpub»
+python host/wallet.py btc psbt-sign tx.psbt -o signed.psbt   # подписать PSBT из Sparrow
+python host/wallet.py btc psbt-sign tx.psbt --broadcast      # и сразу собрать и отправить
+```
+PSBT разбирает хост (`host/psbt.py`, BIP174 v0) и переводит в обычный запрос устройства — для
+денег это не опаснее: получателей устройство показывает само, адрес сдачи (по `bip32_derivation`
+выхода) выводит само, суммы входов проверяет по предыдущим транзакциям (`non_witness_utxo`
+или скачивает), подписывает только SIGHASH_ALL. Только свои P2WPKH-входы m/84'/c'/0'/…;
+мультиподписи и подписи без провода (SD/QR) пока нет. Отпечаток мастер-ключа — команда
+`fingerprint`.
+
 **Майнинг Pearl.** Возьми адрес из `prl receive` (сверь с экраном) и укажи его как адрес
 выплат в пуле или в `pearld --miningaddr`. Pearl Wallet с теми же словами покажет те же
 адреса (BIP86, `m/86'/808276'/0'`). Награда за блок доступна через 100 блоков, `prl balance`
@@ -535,10 +550,9 @@ BSC и ETH: `app bsc|eth addr|show <i>`, `app bsc|eth sign <i> <rlp hex>`;
    прошивку, полная защита — после перевода в Release.
 2. **Ввод seed на телефоне или ПК** удобен, но устройство ввода видит фразу. Ввода на самом
    устройстве одной кнопкой пока нет.
-3. Нет PSBT (совместимость со Sparrow/Electrum).
-4. TRON: на экране `fee_limit`, но не реальная цена энергии; нет мемо и TRC10.
-5. BSC: только legacy-транзакции, nonce и цену газа сообщает хост.
-6. Pearl: только key-path Taproot; своих P2MR/XMSS-ключей нет.
+3. TRON: на экране `fee_limit`, но не реальная цена энергии; нет мемо и TRC10.
+4. BSC: только legacy-транзакции, nonce и цену газа сообщает хост.
+5. Pearl: только key-path Taproot; своих P2MR/XMSS-ключей нет.
 
 ## Лицензия
 

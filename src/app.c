@@ -342,6 +342,12 @@ static void handle(char *line) {
            (int)(apps_free() / 1024), menu_addr_count(), hal_secure(), hal_ota_info());
     return;
   }
+  if (!strcmp(cmd, "fingerprint")) {  // отпечаток мастер-ключа (не секрет): для PSBT и Sparrow
+    uint32_t fp;
+    if (!wallet_master_fingerprint(&fp)) reply("err no wallet on device");
+    else reply("ok %08lx", (unsigned long)fp);
+    return;
+  }
   if (!strcmp(cmd, "addrs")) {  // addrs <1|5|10|20>: сколько адресов для получения
     if (!a1 || !menu_set_addr_count(atoi(a1))) {
       reply("err usage: addrs 1|5|10|20");
