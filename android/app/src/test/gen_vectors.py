@@ -218,6 +218,23 @@ def main():
         except W.WalletError as e:
             assert "подними лимит" in str(e), e
 
+        # ---------- TON (testnet: GRAM; USDT есть только в mainnet — его сверяет TonTest с @ton/ton) ----------
+        W.ton_valid_until = lambda: 1800000000
+        api = cfg["ton_api"]
+        tdest = "kQBvb29vb29vb29vb29vb29vb29vb29vb29vb29vb29vb5Qz"  # testnet, bounceable
+        responses[f"POST {api}/v2/runGetMethod seqno"] = {"ok": True, "result": {"exit_code": 0, "stack": [["num", "0x7"]]}}
+        responses[f"POST {api}/v2/estimateFee"] = {"ok": True, "result": {"source_fees": {
+            "in_fwd_fee": 1_200_000, "storage_fee": 31, "gas_fee": 2_900_000, "fwd_fee": 400_000}}}
+        for index, state, bal, memo in ((0, "active", 5_000_000_000, "invoice 42"), (1, "uninitialized", 1_000_000_000, None)):
+            own = w.address("ton", index)
+            responses[f"GET {api}/v2/getAddressInformation?address={own}"] = {
+                "ok": True, "result": {"balance": str(bal), "state": state}}
+            d7 = w.prepare_send("ton", tdest, "0.25", asset="gram", index=index, memo=memo)
+            r = w.sign_and_send(d7, broadcast=False)
+            cases.append({"coin": "ton", "asset": "gram", "dest": tdest, "amount": "0.25", "index": index,
+                          "memo": memo or "", "raw": r["raw"], "txid": r["txid"], "fee": d7.fee, "notes": d7.notes,
+                          "exact": True})
+
         # ---------- BSC ----------
         rpc = cfg["bsc_rpc"]
         responses[f"POST {rpc} eth_getTransactionCount"] = {"jsonrpc": "2.0", "id": 1, "result": "0x7"}
@@ -232,7 +249,7 @@ def main():
             cases.append({"coin": "bsc", "asset": asset, "dest": bdest, "amount": amt,
                           "raw": r["raw"], "txid": r["txid"], "fee": d5.fee, "exact": True})
 
-        addrs = {c: w.address(c, 0) for c in ("btc", "prl", "tron", "bsc")}
+        addrs = {c: w.address(c, 0) for c in ("btc", "prl", "tron", "bsc", "ton")}
         dev.p.stdin.close()
 
     json.dump({"addresses": addrs, "responses": responses, "cases": cases}, sys.stdout, indent=1)

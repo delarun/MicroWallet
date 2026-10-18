@@ -1,0 +1,6 @@
+id=ton
+name=TON
+version=1.0
+# ромб TON: перевёрнутый треугольник с чертой
+icon=ff995a5a3c3c1800
+path=44'/607'

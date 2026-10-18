@@ -104,7 +104,7 @@ fun ConnectScreen(vm: AppViewModel) {
         )
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            for (c in listOf("btc", "prl", "tron", "bsc", "eth", "usdt")) CoinIcon(c, 28.dp)
+            for (c in listOf("btc", "prl", "tron", "bsc", "eth", "ton", "usdt")) CoinIcon(c, 28.dp)
         }
         Spacer(Modifier.height(32.dp))
 

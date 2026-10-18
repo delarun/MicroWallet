@@ -53,6 +53,7 @@ import com.journeyapps.barcodescanner.ScanOptions
 import io.microwallet.app.core.COINS
 import io.microwallet.app.core.Draft
 import io.microwallet.app.core.NetConfig
+import io.microwallet.app.core.Ton
 import io.microwallet.app.core.SendRequest
 import io.microwallet.app.core.SendResult
 import io.microwallet.app.core.WalletError
@@ -127,6 +128,7 @@ fun validateDest(coin: String, cfg: NetConfig, text: String): String? = try {
         "btc" -> addressToScript(text, cfg.hrp)
         "prl" -> addressToScript(text, cfg.prlHrp, true)
         "tron" -> tronDecode(text)
+        "ton" -> Ton.parseAddress(text, cfg.tonUsdt == null)
         else -> evmDecode(text)
     }
     null
@@ -134,7 +136,7 @@ fun validateDest(coin: String, cfg: NetConfig, text: String): String? = try {
     e.message
 }
 
-private val HINTS = mapOf("btc" to "tb1… или bc1…", "prl" to "prl1p… (Taproot)", "tron" to "T…", "bsc" to "0x…", "eth" to "0x…")
+private val HINTS = mapOf("btc" to "tb1… или bc1…", "prl" to "prl1p… (Taproot)", "tron" to "T…", "bsc" to "0x…", "eth" to "0x…", "ton" to "UQ… или EQ…")
 
 @Composable
 fun SendScreen(vm: AppViewModel) {
@@ -287,6 +289,16 @@ private fun SendForm(vm: AppViewModel) {
                     keyboard = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii))
                 if (s.memo.isNotEmpty()) Hint("Memo стоит ~1 TRX и показывается на устройстве")
             }
+            s.coin == "ton" -> {
+                FieldLabel("Комиссия")
+                Hint(if (s.asset == "usdt") "Тысячные доли GRAM; ещё 0.05 GRAM на пересылку жетона, лишнее вернётся"
+                     else "Тысячные доли GRAM, оценка — на следующем шаге")
+                Spacer(Modifier.height(10.dp))
+                FieldLabel("Комментарий (необязательно)")
+                InputField(s.memo, { s.memo = it.filter { ch -> ch.code in 0x20..0x7E }.take(Ton.COMMENT_MAX) },
+                    placeholder = "видно в блокчейне всем",
+                    keyboard = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Ascii))
+            }
             else -> {
                 FieldLabel("Комиссия")
                 Hint("Цена газа — по сети, оплачивается в ${w.symbol(if (s.coin == "eth") "eth" else "bnb")}")
@@ -312,7 +324,7 @@ private fun SendForm(vm: AppViewModel) {
                     coin = s.coin, dest = s.dest, amount = s.amount, asset = s.asset,
                     feerate = if (utxo) s.levels?.get(s.feeLevel) else null,
                     feeLimit = if (s.coin == "tron" && s.asset == "usdt") s.feeLimit.ifBlank { null } else null,
-                    memo = if (s.coin == "tron") s.memo.ifEmpty { null } else null,
+                    memo = if (s.coin == "tron" || s.coin == "ton") s.memo.ifEmpty { null } else null,
                 )
                 vm.run({ w.prepareSend(req) }, {
                     s.preparing = false

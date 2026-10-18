@@ -161,7 +161,7 @@ private fun Assets(coin: String, b: Balance) {
             CoinIcon(if (token) a.id else coin, 26.dp)
             Spacer(Modifier.width(10.dp))
             Text(
-                a.symbol + if (token) " · " + mapOf("tron" to "TRC20", "bsc" to "BEP20", "eth" to "ERC20")[coin].orEmpty() else "",
+                a.symbol + if (token) " · " + mapOf("tron" to "TRC20", "bsc" to "BEP20", "eth" to "ERC20", "ton" to "TON")[coin].orEmpty() else "",
                 color = C.muted, fontSize = 14.sp, modifier = Modifier.weight(1f),
             )
             Text(fmtUnits(a.amount, a.decimals), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = C.text,

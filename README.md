@@ -3,7 +3,7 @@
 Прошивки, приложения и APK — в [релизах](https://github.com/delarun/MicroWallet/releases).
 
 Монеты: **BTC**, **Pearl** (PRL), **TRON** (TRX, USDT-TRC20, TRC10), **BNB Chain** (BNB, USDT-BEP20),
-**Ethereum** (ETH, USDT, USDC) — из одной мнемоники (12/18/24 слова). В прошивке только ключи,
+**Ethereum** (ETH, USDT, USDC), **TON** (GRAM — бывший Toncoin, USDT) — из одной мнемоники (12/18/24 слова). В прошивке только ключи,
 экраны и связь; каждая монета — приложение WebAssembly в песочнице, ставится и обновляется
 отдельно (как у Ledger).
 
@@ -12,7 +12,7 @@
 - seed из аппаратного ГСЧ; обновление прошивки и приложений — только с подтверждением кнопкой;
 - защищённая сборка: Secure Boot v2 + шифрование флеша и NVS.
 
-> ⚠️ **По умолчанию сборка — testnet** (BTC testnet4, TRON Nile, BSC testnet, Pearl testnet2).
+> ⚠️ **По умолчанию сборка — testnet** (BTC testnet4, TRON Nile, BSC testnet, Pearl testnet2, TON testnet).
 > В обычной сборке seed лежит во флеше открыто: у кого устройство, у того и монеты. Это учебный
 > проект — на mainnet держи только мелкие суммы.
 
@@ -57,7 +57,7 @@ Seed и настройки при обновлении сохраняются. �
 иконок приложений (как у Ledger Nano X), сверху сеть, Bluetooth, USB и заряд.
 
 ```
-Bitcoin ─ Pearl ─ TRON ─ BNB Chain ─ Ethereum ─ Settings
+Bitcoin ─ Pearl ─ TRON ─ BNB Chain ─ Ethereum ─ TON ─ Settings
    └─ Receive ─ About ─ Remove ─ Back
 Settings: Brightness ─ Sleep ─ Power off ─ Addresses ─ Turn off ─ Battery ─ Bluetooth ─
           Forget PCs ─ MicroWallet ─ Wipe ─ Back
@@ -79,7 +79,7 @@ Settings: Brightness ─ Sleep ─ Power off ─ Addresses ─ Turn off ─ Batt
 
 **Android** (`android/`, Kotlin + Compose, по Bluetooth): обзор балансов (обновление жестом
 вниз), получить (QR, проверка на устройстве), отправить (QR-сканер, проверка адреса, комиссия,
-memo для TRON), устройство (прошивка с GitHub/ПК/файла с выбором версии, приложения и их порядок
+memo для TRON, комментарий для TON), устройство (прошивка с GitHub/ПК/файла с выбором версии, приложения и их порядок
 на экране, PSBT, проверка Pearl Wallet). Само обновляется из релизов (сверка SHA-256). Есть демо.
 
 **ПК** — `python host/app.py` (`--ble auto`, `--demo`), то же самое; зависимости —
@@ -96,6 +96,7 @@ python host/wallet.py tron send T… 12.5                                   # US
 python host/wallet.py tron send T… 3 --token trx --memo "invoice 42"      # TRC10: --token trc10:<ID>
 python host/wallet.py bsc send 0x… 0.01 --token bnb
 python host/wallet.py prl send prl1p… 12.5     # prl compat — совместимость с Pearl Wallet
+python host/wallet.py ton send UQ… 1.5 --memo "hi"                         # USDT: --token usdt
 python host/wallet.py btc descriptor           # watch-only для Sparrow/Electrum
 python host/wallet.py btc psbt-sign tx.psbt -o signed.psbt [--broadcast]
 ```
@@ -112,6 +113,12 @@ P2WPKH-входы и SIGHASH_ALL; мультиподписи и подписи �
 выводит ключи нестандартно (btcd `DeriveNonStandard`, ошибка #172): примерно у 0.8 % фраз его
 адреса другие. Проверка — `prl compat` или «Устройство → Pearl Wallet» (ответ одним битом, ключи
 не раскрываются). Монетам на адресах устройства это не грозит.
+
+**TON.** Кошелёк W5 (v5R1), ключи — как в TON-приложении Ledger: `m/44'/607'/0'/0'/i'/0'`
+(testnet — `…/1'/…`). Ledger с той же фразой даст тот же ключ, но Ledger Live показывает
+адрес контракта v4R2; адрес W5 виден в Tonkeeper, если подключить Ledger и выбрать версию W5.
+Первая отправка разворачивает кошелёк (в сообщение добавляется StateInit). Данные — toncenter,
+ключ можно задать в `TONCENTER_API_KEY`.
 
 **TRON.** Сколько TRX сгорит (энергия, bandwidth, активация, memo), хост оценивает по ноде;
 лимит по умолчанию — 40 TRX или оценка + 20 %. Для TronGrid можно задать `TRONGRID_API_KEY`.
@@ -131,6 +138,7 @@ P2WPKH-входы и SIGHASH_ALL; мультиподписи и подписи �
 | PRL | `m/86'/1'/0'` (mainnet `86'/808276'/0'`) | BIP341 подписывает суммы всех входов; выводы P2TR и P2MR |
 | TRON | `m/44'/195'/0'/0/i` | сам разбирает protobuf ноды: один контракт (TRX, TRC10, `transfer()` USDT), лишние поля — отказ; memo на экране; `fee_limit` — потолок, оценку хоста выше потолка отклоняет |
 | BSC, ETH | `m/44'/60'/0'/0/i` | строгий RLP, legacy EIP-155 и EIP-1559; только перевод или `transfer()` токена из белого списка; nonce и сеть на экране |
+| TON | `m/44'/607'/0'/0'/i'/0'` (testnet `…/1'/…`) | сам разбирает BoC сообщения W5: одно действие с режимом 3, без StateInit; тело — пусто, комментарий или перевод USDT на **свой** кошелёк USDT (адрес считает сам), сдача — себе; wallet_id своей сети |
 
 Кроме secp256k1 прошивка умеет ed25519 (SLIP-10) и sr25519 (Substrate) — для будущих приложений.
 
@@ -146,7 +154,7 @@ tools/release.sh [v0.7.3]                        # всё для релиза в
 
 Симулятор — то же ядро на ПК (`tools/sim/build.sh mwsim`), на нём тесты:
 `test_apps` (песочница, EVM), `test_golden` (адреса и подписи против эталонов), `test_utxo`,
-`test_psbt` (против embit), `test_tron`, `test_btcd`, `test_curves`, `test_store`
+`test_psbt` (против embit), `test_tron`, `test_ton` (против @ton/ton), `test_btcd`, `test_curves`, `test_store`
 (`python3 tools/sim/<тест>.py mwsim`). Android: `MW_SIM=… ./gradlew testDebugUnitTest` —
 Kotlin-кошелёк собирает те же транзакции байт в байт, что `host/wallet.py`.
 
@@ -180,6 +188,7 @@ Kotlin-кошелёк собирает те же транзакции байт �
 | EVM: EIP-1559, nonce | ✅ | Sepolia / BSC testnet не проверены |
 | TRON: memo, TRC10, оценка комиссии | ✅ | Nile не проверен |
 | Проверка совместимости с Pearl Wallet | ✅ | нужна прошивка 0.7.3 |
+| TON: GRAM, USDT, кошелёк W5 | ✅ против @ton/ton | адреса и оценка комиссии — на testnet; отправка не проверена |
 | Secure Boot, OTA по USB и Bluetooth, BLE-канал | ✅ | ✅ на плате (mainnet, secure) |
 
 ## Известные слабые места
@@ -188,7 +197,8 @@ Kotlin-кошелёк собирает те же транзакции байт �
 2. Seed, введённый на телефоне или ПК, видит это устройство; ввода на самом устройстве нет.
 3. TRON: реальную стоимость устройство знает со слов хоста (проверяет только потолок); имя и
    точность TRC10 не проверить.
-4. EVM: nonce и цену газа сообщает хост; BSC с телефона уходит legacy-транзакцией.
+4. EVM: nonce и цену газа сообщает хост; BSC с телефона уходит legacy-транзакцией. TON: seqno и
+   срок сообщения тоже от хоста (устройство их не показывает: ошибка в них не тратит деньги).
 5. Pearl: только key-path Taproot, своих P2MR/XMSS-ключей нет.
 6. Прошивка по Bluetooth идёт кусками по одному (~70 с): с конвейером вставала на 1 %, причина не найдена.
 

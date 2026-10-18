@@ -68,9 +68,9 @@ class SimTest {
         assertTrue(w.restore("abandon ".repeat(11) + "about"))
         assertTrue(Sim.apps.size >= 4)
         for (f in Sim.apps) w.installApp(inspectApp(f.readBytes())) { _, _ -> }
-        assertEquals(listOf("btc", "prl", "tron", "bsc", "eth"), w.coins)
+        assertEquals(listOf("btc", "prl", "tron", "bsc", "eth", "ton"), w.coins)
         val addrs = vectors.getJSONObject("addresses")
-        for (c in listOf("btc", "prl", "tron", "bsc")) assertEquals(addrs.getString(c), w.address(c))
+        for (c in listOf("btc", "prl", "tron", "bsc", "ton")) assertEquals(addrs.getString(c), w.address(c))
 
         // 3. длинная команда через канал: подпись Pearl
         val d = w.prepareSend(SendRequest("prl", w.address("prl", 7), "5.5", feerate = BigDecimal(2)))
@@ -158,6 +158,7 @@ class SimTest {
             for (f in Sim.apps) setup.installApp(inspectApp(f.readBytes())) { _, _ -> }
         }
         val w = Wallet(dev, FakeHttp(vectors.getJSONObject("responses")), Sim.words)
+        w.tonValidUntil = { 1800000000 }  // как в gen_vectors.py
         val cases = vectors.getJSONArray("cases")
         for (i in 0 until cases.length()) {
             val c = cases.getJSONObject(i)
@@ -167,6 +168,7 @@ class SimTest {
                 feerate = c.optString("feerate").ifEmpty { null }?.let { BigDecimal(it) },
                 feeLimit = c.optString("feeLimit").ifEmpty { null },
                 memo = c.optString("memo").ifEmpty { null },
+                index = c.optInt("index"),
             )
             val d = w.prepareSend(req)
             val r = w.signAndSend(d, broadcast = false)

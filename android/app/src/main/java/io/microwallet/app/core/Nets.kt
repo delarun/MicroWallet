@@ -8,6 +8,8 @@ class NetConfig(
     val prlApi: String, val prlHrp: String, val prl: String,
     // Ethereum — приложение WebAssembly на устройстве (apps/eth)
     val ethRpc: String, val ethTxUrl: String, val ethChain: Long, val eth: String, val ethTokens: List<EvmToken>,
+    // TON (приложение apps/ton): GRAM — бывший Toncoin; USDT только в mainnet
+    val tonApi: String, val tonTxUrl: String, val tonUsdt: String?, val gram: String,
 )
 
 class EvmToken(val asset: String, val symbol: String, val contract: String, val decimals: Int)
@@ -46,6 +48,10 @@ val NETS = mapOf(
         ethChain = 11155111,
         eth = "SepoliaETH",
         ethTokens = listOf(EvmToken("usdc", "USDC", "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", 6)),
+        tonApi = "https://testnet.toncenter.com/api",
+        tonTxUrl = "https://testnet.tonviewer.com/transaction/",
+        tonUsdt = null,
+        gram = "tGRAM",
     ),
     "mainnet" to NetConfig(
         btc = "BTC",
@@ -70,6 +76,10 @@ val NETS = mapOf(
             EvmToken("usdt", "USDT", "0xdAC17F958D2ee523a2206206994597C13D831ec7", 6),
             EvmToken("usdc", "USDC", "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", 6),
         ),
+        tonApi = "https://toncenter.com/api",
+        tonTxUrl = "https://tonviewer.com/transaction/",
+        tonUsdt = "EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs",
+        gram = "GRAM",
     ),
 )
 
@@ -81,6 +91,7 @@ fun NetConfig.symbol(asset: String): String = when (asset) {
     "btc" -> btc
     "bnb" -> bnb
     "prl" -> prl
+    "gram" -> gram
     else -> if (asset.startsWith("trc10:")) "#" + asset.removePrefix("trc10:") else asset.uppercase()
 }
 
@@ -90,8 +101,11 @@ class CoinInfo(
 )
 
 /** Активы монеты в сети: у Ethereum набор токенов зависит от сети. */
-fun CoinInfo.assetsFor(net: String): List<Pair<String, Int>> =
-    if (id == "eth") NETS.getValue(net).ethTokens.map { it.asset to it.decimals } + ("eth" to 18) else assets
+fun CoinInfo.assetsFor(net: String): List<Pair<String, Int>> = when {
+    id == "eth" -> NETS.getValue(net).ethTokens.map { it.asset to it.decimals } + ("eth" to 18)
+    id == "ton" && NETS.getValue(net).tonUsdt == null -> assets.filter { it.first != "usdt" }  // в testnet USDT нет
+    else -> assets
+}
 
 /** Порядок — как на устройстве и в приложении для ПК. */
 val COINS = listOf(
@@ -100,6 +114,7 @@ val COINS = listOf(
     CoinInfo("tron", "TRON", listOf("usdt" to 6, "trx" to 6), mapOf("testnet" to "Nile", "mainnet" to "mainnet")),
     CoinInfo("bsc", "BNB Chain", listOf("usdt" to 18, "bnb" to 18), mapOf("testnet" to "testnet", "mainnet" to "mainnet")),
     CoinInfo("eth", "Ethereum", listOf("eth" to 18), mapOf("testnet" to "Sepolia", "mainnet" to "mainnet")),
+    CoinInfo("ton", "TON", listOf("gram" to 9, "usdt" to 6), mapOf("testnet" to "testnet", "mainnet" to "mainnet")),
 )
 
 fun coinInfo(id: String): CoinInfo = COINS.first { it.id == id }

@@ -18,6 +18,7 @@ MicroWallet: библиотека для общения с устройство�
   python wallet.py btc  send ADDR SATS [--feerate SAT_PER_VB] [--dry-run]
 
   python wallet.py prl compat             # покажет ли Pearl Wallet с этой фразой те же адреса
+  python wallet.py ton send ADDR AMOUNT [--token gram|usdt] [--memo TEXT] [--dry-run]
   python wallet.py tron receive [-i N] | balance [-i N]
   python wallet.py tron send ADDR AMOUNT [--token usdt|trx|trc10:ID] [--fee-limit TRX] [--memo TEXT] [--dry-run]
 
@@ -50,6 +51,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zlib
 from dataclasses import dataclass, field
@@ -61,6 +63,7 @@ import serial
 from serial.tools import list_ports
 
 import psbt  # PSBT для Sparrow/Electrum (host/psbt.py)
+import ton as T  # TON: ячейки, BoC, кошелёк W5 (host/ton.py)
 
 NETS = {
     "testnet": {
@@ -78,6 +81,10 @@ NETS = {
         "prl_api": "https://blockbook.testnet.pearlresearch.ai",
         "prl_hrp": "tprl",
         "prl": "tPRL",
+        "ton_api": "https://testnet.toncenter.com/api",
+        "ton_tx_url": "https://testnet.tonviewer.com/transaction/",
+        "ton_usdt": None,  # официального USDT в testnet нет
+        "gram": "tGRAM",
     },
     "mainnet": {
         "btc": "BTC",
@@ -94,6 +101,10 @@ NETS = {
         "prl_api": "https://blockbook.pearlresearch.ai",
         "prl_hrp": "prl",
         "prl": "PRL",
+        "ton_api": "https://toncenter.com/api",
+        "ton_tx_url": "https://tonviewer.com/transaction/",
+        "ton_usdt": "EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs",
+        "gram": "GRAM",
     },
 }
 # Монеты и их активы: (id, decimals). Символ берётся из NETS там, где он зависит от сети.
@@ -102,7 +113,18 @@ COINS = {
     "tron": {"name": "TRON", "assets": [("usdt", 6), ("trx", 6)]},
     "bsc": {"name": "BNB Chain", "assets": [("usdt", 18), ("bnb", 18)]},
     "prl": {"name": "Pearl", "assets": [("prl", 8)]},
+    "ton": {"name": "TON", "assets": [("gram", 9), ("usdt", 6)]},  # GRAM — бывший Toncoin
 }
+
+
+def ton_valid_until():
+    """Срок подписанного сообщения TON: 10 минут на подтверждение (тесты подменяют)."""
+    return int(time.time()) + 600
+
+
+def assets_for(coin, net):
+    """Активы монеты в сети: у TON в testnet нет USDT."""
+    return [a for a in COINS[coin]["assets"] if not (coin == "ton" and a[0] == "usdt" and not NETS[net]["ton_usdt"])]
 ADDRS_DEFAULT = 20  # адресов для получения, если прошивка не сообщает addrs= (до 0.6)
 CHANGE_MAX = 20     # адреса сдачи идут подряд: проверяем до первого пустого, не дальше
 TX_MAX_IN = 64  # лимит приложений btc/prl (запрос уходит блоком)
@@ -791,6 +813,8 @@ class Wallet:
                     "pending": sum(u["value"] for u in immature),
                     "utxos": utxos, "immature": immature}
         addr = self.address(coin, index)
+        if coin == "ton":
+            return self._ton_balance(addr)
         if coin == "tron":
             acc = self._tron_post("/wallet/getaccount", {"address": addr, "visible": True})
             notes = [] if acc else ["Аккаунт не активирован: нужно получить хотя бы 1 TRX"]
@@ -815,6 +839,8 @@ class Wallet:
             return self._prepare_utxo(coin, dest, amount, feerate)
         if coin == "tron":
             return self._prepare_tron(index, dest, amount, asset, fee_limit, memo)
+        if coin == "ton":
+            return self._prepare_ton(index, dest, amount, asset, memo)
         return self._prepare_bsc(index, dest, amount, asset, gas_price)
 
     def sign_and_send(self, draft, broadcast=True):
@@ -1177,6 +1203,117 @@ class Wallet:
                      fee_label="Макс. комиссия" if usdt else "Комиссия (оценка)",
                      notes=notes, sign=sign, broadcast=broadcast, tx_url=self.cfg["tron_tx_url"])
 
+    # ================= TON (GRAM, USDT; кошелёк W5) =================
+
+    def _ton(self, path, body=None, **query):
+        """toncenter: /v2/… (ответ в result) и /v3/…; ключ — TONCENTER_API_KEY (без него 1 запрос/с)."""
+        url = self.cfg["ton_api"] + path + ("?" + urllib.parse.urlencode(query) if query else "")
+        key = os.environ.get("TONCENTER_API_KEY")
+        r = http_json(url, body, {"X-API-Key": key} if key else None)
+        if path.startswith("/v2/"):
+            if not r.get("ok", True) or "result" not in r:
+                raise WalletError(f"toncenter: {r.get('error', r)}")
+            return r["result"]
+        return r
+
+    def _ton_info(self, addr):
+        """(баланс в нано-GRAM, кошелёк развёрнут, seqno)"""
+        info = self._ton("/v2/getAddressInformation", address=addr)
+        active = info.get("state") == "active"
+        seqno = 0
+        if active:
+            r = self._ton("/v2/runGetMethod", {"address": addr, "method": "seqno", "stack": []})
+            if r.get("exit_code") != 0:
+                raise WalletError(f"toncenter: seqno, код {r.get('exit_code')}")
+            seqno = int(r["stack"][0][1], 16)
+        return int(info.get("balance", 0)), active, seqno
+
+    def _ton_usdt(self, addr):
+        if not self.cfg["ton_usdt"]:
+            return 0
+        r = self._ton("/v3/jetton/wallets", owner_address=addr, jetton_address=self.cfg["ton_usdt"], limit=1)
+        w = r.get("jetton_wallets") or []
+        return int(w[0]["balance"]) if w else 0
+
+    def _ton_balance(self, addr):
+        bal, active, _ = self._ton_info(addr)
+        notes = [] if active else ["Кошелёк ещё не развёрнут: первая отправка развернёт его"]
+        assets = [{"id": "gram", "symbol": self.symbol("gram"), "decimals": 9, "amount": bal}]
+        if self.cfg["ton_usdt"]:
+            assets.insert(0, {"id": "usdt", "symbol": "USDT", "decimals": 6, "amount": self._ton_usdt(addr)})
+        return {"address": addr, "notes": notes, "pending": 0, "assets": assets}
+
+    def _ton_fee(self, own, signing, init):
+        """Оценка комиссии сети (нано-GRAM) по toncenter estimateFee; None — не удалось."""
+        body = T.signed_body(signing, bytes(64))
+        req = {"address": own, "body": base64.b64encode(T.to_boc(body)).decode(), "ignore_chksig": True}
+        if init is not None:
+            req["init_code"] = base64.b64encode(T.to_boc(init.refs[0])).decode()
+            req["init_data"] = base64.b64encode(T.to_boc(init.refs[1])).decode()
+        try:
+            f = self._ton("/v2/estimateFee", req)["source_fees"]
+            return sum(int(f.get(k, 0)) for k in ("in_fwd_fee", "storage_fee", "gas_fee", "fwd_fee"))
+        except (WalletError, KeyError, TypeError, ValueError):
+            return None
+
+    def _prepare_ton(self, index, dest, amount, asset, memo=None):
+        tn = self.net != "mainnet"
+        own_s = self.address("ton", index)
+        try:
+            own = T.parse_address(own_s, tn)[0]
+            to, bounce = T.parse_address(dest, tn)
+        except T.TonError as e:
+            raise WalletError(str(e)) from None
+        memo = memo or ""
+        if len(memo) > T.COMMENT_MAX or any(not 0x20 <= ord(c) <= 0x7E for c in memo):
+            raise WalletError(f"Комментарий — печатные латинские символы, не длиннее {T.COMMENT_MAX}")
+        bal, active, seqno = self._ton_info(own_s)
+        usdt = asset == "usdt"
+        if usdt:
+            if not self.cfg["ton_usdt"]:
+                raise WalletError("В TON testnet нет USDT")
+            units = to_units(amount, 6)
+            if units > self._ton_usdt(own_s):
+                raise WalletError("Недостаточно USDT")
+            jw = T.usdt_wallet(own, T.parse_address(self.cfg["ton_usdt"], False)[0])
+            msg = T.internal(jw, T.USDT_ATTACH, True, T.jetton_transfer(units, to, own, memo or None))
+            shown_to, spend = T.friendly(to, False, tn), T.USDT_ATTACH
+        else:
+            units = to_units(amount, 9)
+            msg = T.internal(to, units, bounce, T.comment_cell(memo) if memo else None)
+            shown_to, spend = T.friendly(to, bounce, tn), units
+        init = None
+        if not active:  # первая отправка разворачивает кошелёк: нужен StateInit с ключом
+            pub = bytes.fromhex(self.dev.call(self.cmd("ton", f"pubkey {index}")))
+            if T.w5_address(pub, tn) != own:
+                raise WalletError("Ключ устройства не соответствует адресу")
+            init = T.w5_init(pub, tn)
+        signing = T.signing_message(tn, seqno, ton_valid_until(), msg)
+        fee = self._ton_fee(own_s, signing, init)
+        if spend + (fee or 0) > bal:
+            raise WalletError(f"Недостаточно {self.symbol('gram')}: нужно ≈{fmt_units(spend + (fee or 0), 9)}")
+
+        def sign():
+            sig = bytes.fromhex(self.dev.call(self.cmd("ton", f"sign {index} {T.to_boc(signing).hex()}")))
+            body = T.signed_body(signing, sig)
+            return T.to_boc(T.external(own, body, init)).hex(), T.normalized_hash(own, body).hex()
+
+        def broadcast(raw_hex):
+            self._ton("/v2/sendBoc", {"boc": base64.b64encode(bytes.fromhex(raw_hex)).decode()})
+
+        notes = []
+        if usdt:
+            notes.append(f"Сеть ≈{fmt_units(fee, 9) if fee is not None else '?'} {self.symbol('gram')}; "
+                         f"из {fmt_units(T.USDT_ATTACH, 9)} на пересылку жетона лишнее вернётся")
+        if init is not None:
+            notes.append("Первая отправка развернёт кошелёк — комиссия чуть выше")
+        if memo:
+            notes.append(f"Комментарий: {memo}")
+        return Draft("ton", asset, self.symbol(asset), own_s, shown_to, fmt_units(units, 6 if usdt else 9),
+                     fmt_units(T.USDT_ATTACH, 9) if usdt else (f"≈{fmt_units(fee, 9)}" if fee is not None else "?"),
+                     self.symbol("gram"), fee_label="Макс. комиссия" if usdt else "Комиссия (оценка)",
+                     notes=notes, sign=sign, broadcast=broadcast, tx_url=self.cfg["ton_tx_url"])
+
     # ================= BSC =================
 
     def _bsc_rpc(self, method, *params):
@@ -1334,6 +1471,11 @@ def main():
         ap.add_argument("--token", choices=["usdt", "bnb"], default="usdt")
         ap.add_argument("--gas-price", type=Decimal, help="gwei (по умолчанию eth_gasPrice)")
     coin("bsc", ["receive", "balance", "send"], "сумма, например 12.5", bsc_opts)
+
+    def ton_opts(ap):
+        ap.add_argument("--token", choices=["gram", "usdt"], default="gram")
+        ap.add_argument("--memo", help="комментарий к переводу (виден в блокчейне всем)")
+    coin("ton", ["receive", "balance", "send"], "сумма, например 1.5", ton_opts)
 
     coin("prl", ["receive", "balance", "send", "compat"], "сумма в PRL, например 12.5",
          lambda ap: ap.add_argument("--feerate", type=Decimal,

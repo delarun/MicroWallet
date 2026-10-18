@@ -197,6 +197,8 @@ class Wallet(
     private val http: Http,
     private val wordlist: List<String> = emptyList(),
 ) : WalletApi {
+    /** Срок подписанного сообщения TON: 10 минут на подтверждение (тесты подменяют). */
+    var tonValidUntil: () -> Long = { System.currentTimeMillis() / 1000 + 600 }
     override var info: Map<String, String> = dev.info()
         private set
     override val net: String = info["net"] ?: "testnet"
@@ -469,6 +471,7 @@ class Wallet(
             )
         }
         val addr = address(coin, 0)
+        if (coin == "ton") return tonBalance(addr)
         if (coin == "tron") {
             val acc = tronPost("/wallet/getaccount", JSONObject().put("address", addr).put("visible", true)) as JSONObject
             val notes = if (acc.length() == 0) listOf("Аккаунт не активирован: нужно получить хотя бы 1 TRX") else emptyList()
@@ -499,6 +502,7 @@ class Wallet(
         return when (req.coin) {
             "btc", "prl" -> prepareUtxo(req.coin, req.dest, req.amount, req.feerate)
             "tron" -> prepareTron(req.index, req.dest, req.amount, asset, req.feeLimit, req.memo)
+            "ton" -> prepareTon(req.index, req.dest, req.amount, asset, req.memo)
             else -> prepareEvm(cfg.evm(req.coin, chainId), req.index, req.dest, req.amount, asset, req.gasPrice)
         }
     }
@@ -659,6 +663,127 @@ class Wallet(
     }
 
     // ================= TRON =================
+
+    // ================= TON (GRAM, USDT; кошелёк W5) — как _prepare_ton в wallet.py =================
+
+    private fun tonGet(path: String, vararg q: Pair<String, Any>): JSONObject {
+        val url = cfg.tonApi + path + if (q.isEmpty()) "" else
+            "?" + q.joinToString("&") { "${it.first}=${java.net.URLEncoder.encode(it.second.toString(), "UTF-8")}" }
+        return tonResult(path, http.get(url) as JSONObject)
+    }
+
+    private fun tonPost(path: String, body: JSONObject) = tonResult(path, http.post(cfg.tonApi + path, body) as JSONObject)
+
+    private fun tonResult(path: String, r: JSONObject): JSONObject {
+        if (!path.startsWith("/v2/")) return r
+        if (!r.optBoolean("ok", true) || !r.has("result")) throw WalletError("toncenter: ${r.opt("error") ?: r}")
+        return r.optJSONObject("result") ?: JSONObject().put("value", r.get("result"))
+    }
+
+    /** (баланс в нано-GRAM, кошелёк развёрнут, seqno) */
+    private fun tonInfo(addr: String): Triple<BigInteger, Boolean, Long> {
+        val info = tonGet("/v2/getAddressInformation", "address" to addr)
+        val active = info.optString("state") == "active"
+        var seqno = 0L
+        if (active) {
+            val r = tonPost("/v2/runGetMethod", JSONObject().put("address", addr).put("method", "seqno").put("stack", JSONArray()))
+            if (r.optInt("exit_code", -1) != 0) throw WalletError("toncenter: seqno, код ${r.opt("exit_code")}")
+            seqno = r.getJSONArray("stack").getJSONArray(0).getString(1).removePrefix("0x").toLong(16)
+        }
+        return Triple(BigInteger(info.optString("balance", "0").ifEmpty { "0" }), active, seqno)
+    }
+
+    private fun tonUsdt(addr: String): BigInteger {
+        val master = cfg.tonUsdt ?: return BigInteger.ZERO
+        val w = tonGet("/v3/jetton/wallets", "owner_address" to addr, "jetton_address" to master, "limit" to 1)
+            .optJSONArray("jetton_wallets")
+        return if (w != null && w.length() > 0) BigInteger(w.getJSONObject(0).getString("balance")) else BigInteger.ZERO
+    }
+
+    private fun tonBalance(addr: String): Balance {
+        val (bal, active, _) = tonInfo(addr)
+        val assets = ArrayList<Asset>()
+        if (cfg.tonUsdt != null) assets += Asset("usdt", "USDT", 6, tonUsdt(addr))
+        assets += Asset("gram", symbol("gram"), 9, bal)
+        return Balance(addr, assets, notes = if (active) emptyList() else listOf("Кошелёк ещё не развёрнут: первая отправка развернёт его"))
+    }
+
+    private fun tonFee(own: String, signing: Ton.Cell, init: Ton.Cell?): BigInteger? = try {
+        val b64 = java.util.Base64.getEncoder()
+        val req = JSONObject().put("address", own)
+            .put("body", b64.encodeToString(Ton.toBoc(Ton.signedBody(signing, ByteArray(64))))).put("ignore_chksig", true)
+        if (init != null) {
+            req.put("init_code", b64.encodeToString(Ton.toBoc(init.refs[0])))
+            req.put("init_data", b64.encodeToString(Ton.toBoc(init.refs[1])))
+        }
+        val f = tonPost("/v2/estimateFee", req).getJSONObject("source_fees")
+        listOf("in_fwd_fee", "storage_fee", "gas_fee", "fwd_fee").fold(BigInteger.ZERO) { a, k -> a + BigInteger.valueOf(f.optLong(k)) }
+    } catch (e: WalletError) {
+        null
+    } catch (e: org.json.JSONException) {
+        null
+    }
+
+    private fun prepareTon(index: Int, destIn: String, amount: String, asset: String, memoIn: String?): Draft {
+        val tn = net != "mainnet"
+        val ownS = address("ton", index)
+        val own = Ton.parseAddress(ownS, tn).first
+        val (to, bounce) = Ton.parseAddress(destIn, tn)
+        val memo = memoIn ?: ""
+        if (memo.length > Ton.COMMENT_MAX || memo.any { it.code !in 0x20..0x7E })
+            throw WalletError("Комментарий — печатные латинские символы, не длиннее ${Ton.COMMENT_MAX}")
+        val (bal, active, seqno) = tonInfo(ownS)
+        val usdt = asset == "usdt"
+        val units: BigInteger
+        val msg: Ton.Cell
+        val shownTo: String
+        val spend: BigInteger
+        if (usdt) {
+            val master = cfg.tonUsdt ?: throw WalletError("В TON testnet нет USDT")
+            units = toUnits(amount, 6)
+            if (units > tonUsdt(ownS)) throw WalletError("Недостаточно USDT")
+            val jw = Ton.usdtWallet(own, Ton.parseAddress(master, false).first)
+            msg = Ton.internal(jw, BigInteger.valueOf(Ton.USDT_ATTACH), true, Ton.jettonTransfer(units, to, own, memo.ifEmpty { null }))
+            shownTo = Ton.friendly(to, false, tn)
+            spend = BigInteger.valueOf(Ton.USDT_ATTACH)
+        } else {
+            units = toUnits(amount, 9)
+            msg = Ton.internal(to, units, bounce, if (memo.isNotEmpty()) Ton.commentCell(memo) else null)
+            shownTo = Ton.friendly(to, bounce, tn)
+            spend = units
+        }
+        var init: Ton.Cell? = null
+        if (!active) {  // первая отправка разворачивает кошелёк: нужен StateInit с ключом
+            val pub = dev.call(cmd("ton", "pubkey $index")).unhex()
+            if (Ton.w5Address(pub, tn) != own) throw WalletError("Ключ устройства не соответствует адресу")
+            init = Ton.w5Init(pub, tn)
+        }
+        val signing = Ton.signingMessage(tn, seqno, tonValidUntil(), msg)
+        val fee = tonFee(ownS, signing, init)
+        val need = spend + (fee ?: BigInteger.ZERO)
+        if (need > bal) throw WalletError("Недостаточно ${symbol("gram")}: нужно ≈${fmtUnits(need, 9)}")
+
+        val sign = {
+            val sig = dev.call(cmd("ton", "sign $index ${Ton.toBoc(signing).hex()}")).unhex()
+            val body = Ton.signedBody(signing, sig)
+            Ton.toBoc(Ton.external(own, body, init)).hex() to Ton.normalizedHash(own, body).hex()
+        }
+        val broadcast = { rawHex: String ->
+            tonPost("/v2/sendBoc", JSONObject().put("boc", java.util.Base64.getEncoder().encodeToString(rawHex.unhex())))
+            Unit
+        }
+        val notes = ArrayList<String>()
+        if (usdt) notes += "Сеть ≈${fee?.let { fmtUnits(it, 9) } ?: "?"} ${symbol("gram")}; " +
+            "из ${fmtUnits(BigInteger.valueOf(Ton.USDT_ATTACH), 9)} на пересылку жетона лишнее вернётся"
+        if (init != null) notes += "Первая отправка развернёт кошелёк — комиссия чуть выше"
+        if (memo.isNotEmpty()) notes += "Комментарий: $memo"
+        return Draft(
+            "ton", asset, symbol(asset), ownS, shownTo, fmtUnits(units, if (usdt) 6 else 9),
+            if (usdt) fmtUnits(BigInteger.valueOf(Ton.USDT_ATTACH), 9) else fee?.let { "≈" + fmtUnits(it, 9) } ?: "?",
+            symbol("gram"), feeLabel = if (usdt) "Макс. комиссия" else "Комиссия (оценка)",
+            notes = notes, sign = sign, broadcast = broadcast, txUrl = cfg.tonTxUrl,
+        )
+    }
 
     private fun tronPost(path: String, body: JSONObject) = http.post(cfg.tronApi + path, body)
 
