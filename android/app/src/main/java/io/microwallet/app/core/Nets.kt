@@ -104,7 +104,7 @@ fun coinInfo(id: String): CoinInfo = COINS.first { it.id == id }
 
 const val CHANGE_MAX = 20    // адреса сдачи идут подряд: проверяем до первого пустого, не дальше
 const val SCAN_TTL_MS = 30_000L  // баланс BTC/PRL не чаще раза в 30 с (mempool.space отвечает 429)
-const val TX_MAX_IN = 16     // лимит прошивки
+const val TX_MAX_IN = 64     // лимит приложений btc/prl (запрос уходит блоком)
 const val PRL_COINBASE_MATURITY = 100
 const val ADDRS_DEFAULT = 20  // адресов для получения, если прошивка не сообщает addrs= (до 0.6)
 val ADDRS_CHOICES = listOf(1, 5, 10, 20)  // настройка устройства «Addresses»

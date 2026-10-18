@@ -114,6 +114,17 @@ fun vsizeEstimate(nIn: Int, outScripts: List<ByteArray>, inVbytes: Double): Long
     ceil(11 + inVbytes * nIn + outScripts.sumOf { 9 + it.size }).toLong()
 
 /** Запрос на подпись для прошивки (формат src/tx.c). */
+/** Запрос на подпись блоком (sign @): запрос, затем для BTC — предыдущие транзакции входов
+ *  целиком (u32 длина + байты): по ним устройство само проверяет суммы входов. */
+fun signBlob(tx: UtxoTx, prev: List<ByteArray> = emptyList()): ByteArray {
+    val b = java.io.ByteArrayOutputStream()
+    b.write(buildRequest(tx).unhex())
+    for (raw in prev) {
+        b.write(Buf().u32(raw.size.toLong()).bytes(raw).toByteArray())
+    }
+    return b.toByteArray()
+}
+
 fun buildRequest(tx: UtxoTx): String {
     val b = Buf().u32(tx.version).u32(tx.locktime).u8(tx.ins.size)
     for (i in tx.ins) {
@@ -347,6 +358,11 @@ class Wallet(
     // ================= BTC и Pearl =================
 
     private fun btcGet(path: String) = http.get(cfg.btcApi + path)
+
+    /** Предыдущая транзакция целиком — с кэшем: она не меняется. */
+    private val prevCache = HashMap<String, ByteArray>()
+    private fun prevTx(txid: String): ByteArray =
+        prevCache.getOrPut(txid) { http.getText(cfg.btcApi + "/tx/$txid/hex").unhex() }
     private fun prlGet(path: String) = http.get(cfg.prlApi + "/api/v2" + path)
 
     class Scan(val utxos: List<Utxo>, val immature: List<Utxo>, val changeIndex: Int)
@@ -461,8 +477,11 @@ class Wallet(
             outs = outs,
         )
 
+        // BTC: предыдущие транзакции входов — устройство само проверит по ним суммы
+        val prev = if (prl || legacy) emptyList() else chosen.map { prevTx(it.txid) }
         val sign = {
-            val resp = dev.call(cmd(coin, "sign " + buildRequest(tx)))
+            val resp = if (legacy) dev.call(cmd(coin, "sign " + buildRequest(tx)))  // прошивки до v0.6
+            else dev.appCall(cmd(coin, "sign"), signBlob(tx, prev))
             val wit = resp.split(' ').filter { it.isNotEmpty() }.map { part ->
                 if (prl) listOf(part.unhex()) else part.split(':').map { it.unhex() }
             }

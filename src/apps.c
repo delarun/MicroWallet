@@ -242,7 +242,7 @@ static int g_ui;  // 0 — экранов не было, 1 — проверка 
 static char g_err[64];
 
 // Шаги экрана проверки: поле, сумма крупно, предупреждение
-#define FIELDS 20
+#define FIELDS 40  // до 16 получателей × (сумма + адрес) + предупреждение + комиссия
 static char g_ftitle[FIELDS][24], g_ftext[FIELDS][100];
 static ux_kind_t g_fkind[FIELDS];
 static const uint8_t *g_ficon[FIELDS];

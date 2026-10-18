@@ -12,6 +12,7 @@ import base64
 import hashlib
 import json
 import os
+import struct
 import subprocess
 import sys
 import tempfile
@@ -72,7 +73,10 @@ def main():
     def post_raw(url, raw_hex):
         return responses[f"RAW {url}"]
 
-    W.http_json, W.post_raw = http_json, post_raw
+    def http_text(url):
+        return responses[f"TEXT {url}"]
+
+    W.http_json, W.post_raw, W.http_text = http_json, post_raw, http_text
 
     with tempfile.TemporaryDirectory() as d:
         dev = SimDev(sim, d)
@@ -88,6 +92,21 @@ def main():
         cases = []
 
         # ---------- BTC ----------
+        # Предыдущие транзакции (устройство проверяет по ним суммы входов): детерминированные,
+        # платят на наши адреса; их настоящие txid — в ответах /utxo
+        def prev_tx(tag, outs):
+            body = (struct.pack("<I", 2) + b"\x01" + bytes([tag]) * 32 + struct.pack("<I", 0) + b"\x00"
+                    + struct.pack("<I", 0xFFFFFFFF) + bytes([len(outs)])
+                    + b"".join(struct.pack("<QB", v, len(s)) + s for v, s in outs) + struct.pack("<I", 0))
+            txid = hashlib.sha256(hashlib.sha256(body).digest()).digest()[::-1].hex()
+            responses[f"TEXT {cfg['btc_api']}/tx/{txid}/hex"] = body.hex()
+            return txid
+        s00 = W.address_to_script(w.address("btc", 0, 0), cfg["hrp"])
+        s01 = W.address_to_script(w.address("btc", 1, 0), cfg["hrp"])
+        junk = bytes.fromhex("0014" + "99" * 20)
+        ta = prev_tx(0xA1, [(30000, s00)])
+        tb = prev_tx(0xA2, [(1, junk), (2, junk), (3, junk), (80000, s00)])
+        tc = prev_tx(0xA3, [(4, junk), (25000, s01)])
         for chain in (0, 1):
             for i in range(W.ADDRS_DEFAULT if chain == 0 else W.CHANGE_MAX):
                 a = w.address("btc", i, chain)
@@ -95,8 +114,8 @@ def main():
                 responses[f"GET {cfg['btc_api']}/address/{a}"] = {
                     "chain_stats": {"tx_count": 1 if used else 0}, "mempool_stats": {"tx_count": 0}}
                 if used:
-                    utxo = {(0, 0): [("a1" * 32, 0, 30000, True), ("a2" * 32, 3, 80000, True)],
-                            (0, 1): [("a3" * 32, 1, 25000, False)], (1, 0): []}[(chain, i)]
+                    utxo = {(0, 0): [(ta, 0, 30000, True), (tb, 3, 80000, True)],
+                            (0, 1): [(tc, 1, 25000, False)], (1, 0): []}[(chain, i)]
                     responses[f"GET {cfg['btc_api']}/address/{a}/utxo"] = [
                         {"txid": t, "vout": v, "value": val, "status": {"confirmed": c}} for t, v, val, c in utxo]
         dest = "tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7"

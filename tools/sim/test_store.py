@@ -106,6 +106,7 @@ def main():
 
         # ---- заполнение: 64 КБ модули до отказа ----
         n = 0
+        span_kb = (512 + len(variant(tmp, "big", pad=60000)) + SECTOR - 1) // SECTOR * SECTOR // 1024
         while True:
             r = sim.install(variant(tmp, f"big{n}", pad=60000))
             if r != "ok":
@@ -114,7 +115,20 @@ def main():
         assert r in ("err not enough space for apps",), r
         apps = sim.apps()
         free = int(sim.info()["apps_free"])
-        assert free < 64, free
+        # отказ честный: ни одного непрерывного свободного участка под такой модуль
+        # (сумма свободного может быть и больше — дыры от удалённых приложений)
+        blob = (d / "apps.bin").read_bytes()
+        busy = [False] * (len(blob) // SECTOR)
+        for o in range(0, len(blob), SECTOR):
+            if blob[o:o + 6] == b"MWAPP2":
+                ln = struct.unpack_from("<I", blob, o + 8)[0]
+                for k in range(o // SECTOR, (o + 512 + ln + SECTOR - 1) // SECTOR):
+                    busy[k] = True
+        run = best = 0
+        for b in busy:
+            run = 0 if b else run + 1
+            best = max(best, run)
+        assert best * SECTOR // 1024 < span_kb, (best, span_kb, free)
         print(f"3. заполнено: {len(apps)} приложений, свободно {free} КБ; дальше — «{r[4:]}»")
         for k in range(n):
             assert sim.call(f"app rm big{k}") == "ok"

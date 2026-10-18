@@ -7,17 +7,25 @@
 //   addr [chain] <i>     адрес (chain 0 — приём, 1 — сдача)
 //   show [chain] <i>     то же, со сверкой на экране
 //   xpub                 (только Bitcoin) zpub / vpub аккаунта
-//   sign <hex>           запрос (формат ниже) -> ok <подписи по входам>
+//   sign @               запрос блоком (app put, формат ниже) -> ok <подписи по входам>
+//   sign <hex>           то же строкой — только Pearl (BTC нужны предыдущие транзакции)
 //     BTC: "<DER+01>:<pubkey>" на вход (P2WPKH-свидетель), Pearl: BIP340-подпись на вход
 //
 // Формат запроса (числа little-endian):
 //   u32 version, u32 locktime
 //   u8  n_in;  на каждый вход:  txid[32] u32 vout u32 sequence u64 amount u8 chain u32 index
 //   u8  n_out; на каждый выход: u64 amount u8 script_len script[] u8 is_change u32 change_index
+//   (только BTC, только в блоке) на каждый вход: u32 len, предыдущая транзакция целиком
+//
+// Зачем BTC предыдущие транзакции: подпись BIP143 покрывает сумму только своего входа, и хост
+// мог бы занизить сумму одного входа в одном запросе и другого — в другом: обе подписи верны,
+// а разница уходит в комиссию. Приложение само считает txid каждой предыдущей транзакции,
+// сверяет его с входом и берёт сумму и скрипт выхода оттуда. Pearl (BIP341) это не нужно:
+// подпись и так покрывает суммы и скрипты всех входов.
 #include "mw.h"
 
-#define MAX_IN 16
-#define MAX_OUT 8
+#define MAX_IN 64
+#define MAX_OUT 16
 #define MAX_SCRIPT 42
 #define MAX_INDEX 0x7FFFFFFFu
 
@@ -141,7 +149,8 @@ static uint64_t rd64(rd_t *r) {
   return lo | (hi << 32);
 }
 
-static const char *tx_parse(const uint8_t *buf, size_t len, tx_t *tx) {
+// used == 0 — запрос должен кончиться ровно; иначе туда пишется, сколько он занял
+static const char *tx_parse(const uint8_t *buf, size_t len, tx_t *tx, size_t *used) {
   rd_t r = {buf, len, 0};
   memset(tx, 0, sizeof *tx);
   tx->version = rd32(&r);
@@ -191,7 +200,8 @@ static const char *tx_parse(const uint8_t *buf, size_t len, tx_t *tx) {
     tx->total_out += o->amount;
     if (tx->total_out > MAX_MONEY) return "bad output total";
   }
-  if (r.left) return "trailing bytes";
+  if (used) *used = len - r.left;
+  else if (r.left) return "trailing bytes";
   if (tx->total_out > tx->total_in) return "outputs exceed inputs";
   tx->fee = tx->total_in - tx->total_out;
   return 0;
@@ -369,27 +379,167 @@ static int review(const tx_t *tx) {
   return mw_confirm(UTXO_PRL ? "Pearl transfer" : "Bitcoin transfer");
 }
 
+// ---------- предыдущие транзакции (BTC) ----------
+
+#if !UTXO_PRL
+// Чтение блока по смещению (потоково: транзакция может быть больше памяти модуля)
+typedef struct {
+  uint32_t pos, end;
+  int err;
+} br_t;
+
+static void bread(br_t *b, void *o, uint32_t n) {
+  if (b->err || b->end - b->pos < n || mw_blob_read(b->pos, o, n) != (int)n) {
+    b->err = 1;
+    memset(o, 0, n);
+    return;
+  }
+  b->pos += n;
+}
+
+static void bskip(br_t *b, uint64_t n) {
+  if (b->err || n > b->end - b->pos) {
+    b->err = 1;
+    return;
+  }
+  b->pos += (uint32_t)n;
+}
+
+static uint64_t bvarint(br_t *b) {
+  uint8_t c, v[8] = {0};
+  bread(b, &c, 1);
+  int n = c == 0xfd ? 2 : c == 0xfe ? 4 : c == 0xff ? 8 : 0;
+  if (!n) return c;
+  bread(b, v, (uint32_t)n);
+  uint64_t r = 0;
+  for (int i = n - 1; i >= 0; i--) r = r << 8 | v[i];
+  return r;
+}
+
+// Транзакция в блоке [s, s+len): её txid (без witness) — как у входа, выход vout — наш
+// P2WPKH-скрипт с суммой из запроса
+static const char *prev_check(uint32_t s, uint32_t len, const tx_in_t *in) {
+  br_t b = {s, s + len, 0};
+  uint8_t mf[2], spk[MAX_SCRIPT], own[34], own_n, h[32];
+  uint64_t amount = 0, spk_n = 0;
+  if (len < 10) return "prev tx too short";
+  bskip(&b, 4);  // version
+  bread(&b, mf, 2);
+  int segwit = mf[0] == 0x00 && mf[1] == 0x01;  // marker + flag (без входов транзакций не бывает)
+  b.pos = s + 4 + (segwit ? 2 : 0);
+  uint32_t io = b.pos;
+  uint64_t nin = bvarint(&b);
+  if (!nin) return "bad prev tx";
+  for (uint64_t i = 0; i < nin && !b.err; i++) {
+    bskip(&b, 36);
+    bskip(&b, bvarint(&b));
+    bskip(&b, 4);
+  }
+  uint64_t nout = bvarint(&b);
+  if (b.err || in->vout >= nout) return "bad prev tx output";
+  for (uint64_t j = 0; j < nout && !b.err; j++) {
+    uint8_t a[8];
+    bread(&b, a, 8);
+    uint64_t sl = bvarint(&b);
+    if (j == in->vout) {
+      for (int k = 7; k >= 0; k--) amount = amount << 8 | a[k];
+      spk_n = sl;
+      if (sl > MAX_SCRIPT) return "prev output is not ours";
+      bread(&b, spk, (uint32_t)sl);
+    } else {
+      bskip(&b, sl);
+    }
+  }
+  if (b.err) return "bad prev tx";
+  uint32_t io_end = b.pos;
+  // без witness после выходов сразу locktime; с witness — свидетели (в txid не входят)
+  if (segwit ? io_end > s + len - 4 : io_end != s + len - 4) return "bad prev tx";
+  uint32_t r[6];
+  int nr;
+  if (segwit) {
+    r[0] = s, r[1] = 4, r[2] = io, r[3] = io_end - io, r[4] = s + len - 4, r[5] = 4, nr = 3;
+  } else {
+    r[0] = s, r[1] = len, nr = 1;
+  }
+  if (mw_blob_sha256(r, nr, 1, h) || memcmp(h, in->txid, 32)) return "prev tx does not match input";
+  if (amount != in->amount) return "input amount mismatch";
+  if (!own_script(in->chain, in->index, own, &own_n) || spk_n != own_n || memcmp(spk, own, own_n))
+    return "prev output is not ours";
+  return 0;
+}
+#endif
+
 // ---------- команды ----------
 
 static void cmd_sign(const char *hex, size_t hl) {
-  static uint8_t req[MAX_IN * 60 + MAX_OUT * 60 + 16];
+  static uint8_t req[MAX_IN * 53 + MAX_OUT * (14 + MAX_SCRIPT) + 16];
   static tx_t tx;
-  static char out[MAX_IN * 220 + 8];
-  int n = mw_unhex(hex, hl, req, sizeof req);
-  if (n <= 0) {
-    mw_err("bad hex");
+  static char sig_hex[2 * 73 + 1 + 66 + 2];
+  const char *e;
+  if (hl == 1 && hex[0] == '@') {  // блок: запрос, для BTC за ним предыдущие транзакции
+    int bl = mw_blob_size();
+    int n = mw_blob_read(0, req, sizeof req);
+    size_t used;
+    if (bl <= 0 || n <= 0) {
+      mw_err("no data");
+      return;
+    }
+    if ((e = tx_parse(req, (size_t)n, &tx, &used))) {
+      mw_err(e);
+      return;
+    }
+#if UTXO_PRL
+    if (used != (size_t)bl) {
+      mw_err("trailing bytes");
+      return;
+    }
+#else
+    uint32_t off = (uint32_t)used;
+    for (int i = 0; i < tx.n_in; i++) {
+      uint8_t l[4];
+      if (mw_blob_read(off, l, 4) != 4) {
+        mw_err("prev tx missing");
+        return;
+      }
+      uint32_t pl = l[0] | l[1] << 8 | l[2] << 16 | (uint32_t)l[3] << 24;
+      off += 4;
+      if (pl > (uint32_t)bl - off) {
+        mw_err("prev tx missing");
+        return;
+      }
+      if ((e = prev_check(off, pl, &tx.in[i]))) {
+        mw_err(e);
+        return;
+      }
+      off += pl;
+    }
+    if (off != (uint32_t)bl) {
+      mw_err("trailing bytes");
+      return;
+    }
+#endif
+  } else {
+#if !UTXO_PRL
+    (void)hl;
+    mw_err("previous transactions required: update the wallet app");
     return;
-  }
-  const char *e = tx_parse(req, (size_t)n, &tx);
-  if (e) {
-    mw_err(e);
-    return;
+#else
+    int n = mw_unhex(hex, hl, req, sizeof req);
+    if (n <= 0) {
+      mw_err("bad hex");
+      return;
+    }
+    if ((e = tx_parse(req, (size_t)n, &tx, 0))) {
+      mw_err(e);
+      return;
+    }
+#endif
   }
   if (!review(&tx)) {
     mw_err("rejected");
     return;
   }
-  size_t pos = 0;
+  // Подписи — по одной в ответ (mw_reply, затем mw_reply_more): длинный хост заберёт кусками
 #if UTXO_PRL
   static uint8_t spk[MAX_IN][34];
   for (int i = 0; i < tx.n_in; i++) {
@@ -408,9 +558,10 @@ static void cmd_sign(const char *hex, size_t hl) {
       mw_err("signing failed");
       return;
     }
-    if (pos) out[pos++] = ' ';
-    mw_hex(sig, 64, out + pos);
-    pos += 128;
+    sig_hex[0] = ' ';
+    mw_hex(sig, 64, sig_hex + 1);
+    if (i) mw_reply_more(sig_hex, 129);
+    else mw_reply(sig_hex + 1, 128);
   }
 #else
   for (int i = 0; i < tx.n_in; i++) {
@@ -429,16 +580,17 @@ static void cmd_sign(const char *hex, size_t hl) {
     }
     int dn = der(sig, d);
     d[dn++] = 0x01;  // SIGHASH_ALL
-    if (pos) out[pos++] = ' ';
-    mw_hex(d, (size_t)dn, out + pos);
+    size_t pos = 0;
+    sig_hex[pos++] = ' ';
+    mw_hex(d, (size_t)dn, sig_hex + pos);
     pos += 2 * (size_t)dn;
-    out[pos++] = ':';
-    mw_hex(c, 33, out + pos);
+    sig_hex[pos++] = ':';
+    mw_hex(c, 33, sig_hex + pos);
     pos += 66;
+    if (i) mw_reply_more(sig_hex, pos);
+    else mw_reply(sig_hex + 1, pos - 1);
   }
 #endif
-  out[pos] = 0;
-  mw_reply(out, pos);
 }
 
 // "<i>" или "<chain> <i>"

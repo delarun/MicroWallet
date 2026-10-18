@@ -9,6 +9,8 @@ import java.net.URL
 /** Сеть. JSON-ответы — JSONObject или JSONArray. В тестах подменяется. */
 interface Http {
     fun get(url: String): Any
+    /** GET с текстовым ответом (сырая транзакция в hex у mempool.space). */
+    fun getText(url: String): String
     fun post(url: String, body: JSONObject): Any
     /** POST сырого hex (mempool, Blockbook); ответ — текст. */
     fun postRaw(url: String, raw: String): String
@@ -76,6 +78,17 @@ class UrlHttp : Http {
     }
 
     override fun get(url: String) = json(url, null)
+
+    override fun getText(url: String): String {
+        val r = try {
+            requestRetrying(url, null, false)
+        } catch (e: IOException) {
+            throw WalletError("Нет связи с ${host(url)}: ${e.message}")
+        }
+        if (r.code == 429) throw WalletError("${host(url)}: слишком много запросов, попробуй через минуту")
+        if (r.code !in 200..299) throw WalletError("HTTP ${r.code} от $url: ${r.text.take(300)}")
+        return r.text.trim()
+    }
     override fun post(url: String, body: JSONObject) = json(url, body)
 
     override fun download(url: String, onProgress: (Long, Long) -> Unit): ByteArray {

@@ -101,7 +101,7 @@ COINS = {
 }
 ADDRS_DEFAULT = 20  # адресов для получения, если прошивка не сообщает addrs= (до 0.6)
 CHANGE_MAX = 20     # адреса сдачи идут подряд: проверяем до первого пустого, не дальше
-TX_MAX_IN = 16  # лимит прошивки
+TX_MAX_IN = 64  # лимит приложений btc/prl (запрос уходит блоком)
 PRL_COINBASE_MATURITY = 100
 UA = {"User-Agent": "microwallet/0.5", "Content-Type": "application/json"}
 
@@ -272,14 +272,13 @@ def _retry_wait(e, attempt):
         return 2.0 ** (attempt + 1)
 
 
-def http_json(url, body=None, headers=None):
-    data = None if body is None else json.dumps(body).encode()
+def _fetch(url, data=None, headers=None):
     host = url.split('/')[2]
     for attempt in range(RETRIES + 1):
         req = urllib.request.Request(url, data=data, headers={**UA, **(headers or {})})
         try:
             with urllib.request.urlopen(req, timeout=20) as r:
-                return json.loads(r.read())
+                return r.read()
         except urllib.error.HTTPError as e:
             if e.code in (429, 503) and attempt < RETRIES:
                 time.sleep(_retry_wait(e, attempt))
@@ -289,6 +288,14 @@ def http_json(url, body=None, headers=None):
             raise WalletError(f"HTTP {e.code} от {url}: {e.read().decode(errors='replace')[:300]}")
         except (urllib.error.URLError, TimeoutError, OSError) as e:
             raise WalletError(f"Нет связи с {host}: {e}")
+
+
+def http_json(url, body=None, headers=None):
+    return json.loads(_fetch(url, None if body is None else json.dumps(body).encode(), headers))
+
+
+def http_text(url):
+    return _fetch(url).decode().strip()
 
 
 def post_raw(url, raw_hex):
@@ -459,6 +466,15 @@ def dsha(b):
 def vsize_estimate(n_in, out_scripts, in_vbytes):
     # P2WPKH-вход ~68 vB, P2TR-вход ~57.5 vB, выход = 8 + 1 + len(script), заголовок ~11 vB
     return math.ceil(11 + in_vbytes * n_in + sum(9 + len(s) for s in out_scripts))
+
+
+def sign_blob(tx, prev=None):
+    """Запрос на подпись блоком (app put … / sign @): запрос, затем для BTC — предыдущие
+    транзакции входов целиком (u32 длина + байты): по ним устройство проверяет суммы."""
+    blob = bytes.fromhex(build_request(tx))
+    for raw in prev or []:
+        blob += struct.pack("<I", len(raw)) + raw
+    return blob
 
 
 def build_request(tx):
@@ -715,6 +731,13 @@ class Wallet:
 
     # ================= BTC и Pearl =================
 
+    def _prev_tx(self, txid):
+        """Предыдущая транзакция целиком (сырые байты) — с кэшем: она не меняется."""
+        cache = self.__dict__.setdefault("_prev_cache", {})
+        if txid not in cache:
+            cache[txid] = bytes.fromhex(http_text(self.cfg["btc_api"] + f"/tx/{txid}/hex"))
+        return cache[txid]
+
     def _btc_get(self, path):
         return http_json(self.cfg["btc_api"] + path)
 
@@ -820,8 +843,14 @@ class Wallet:
             "outs": outs,
         }
 
+        # BTC: предыдущие транзакции входов — устройство само проверит по ним суммы
+        prev = [] if prl or self.legacy else [self._prev_tx(u["txid"]) for u in chosen]
+
         def sign():
-            resp = self.dev.call(self.cmd(coin, "sign " + build_request(tx)))
+            if self.legacy:  # прошивки до v0.6: запрос строкой
+                resp = self.dev.call(self.cmd(coin, "sign " + build_request(tx)))
+            else:
+                resp = app_call(self.dev, self.cmd(coin, "sign"), sign_blob(tx, prev))
             if prl:
                 wit = [[bytes.fromhex(sig)] for sig in resp.split()]
             else:

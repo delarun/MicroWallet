@@ -139,7 +139,9 @@ def check(binary, net, g):
                 n += 1
         assert sim.call("app btc xpub") == "ok " + g["xpub"], (sim.call("app btc xpub"), g["xpub"])
         req, sig = g["requests"], g["signatures"]
-        assert sim.call(f"app btc sign {req['btc']}") == sig["btc"], "btc sign"
+        # BTC теперь подписывает только с предыдущими транзакциями (sign @): эталон прежней
+        # прошивки построен на выдуманных txid — подписи проверяет test_utxo.py независимо
+        assert sim.call(f"app btc sign {req['btc']}").startswith("err previous transactions required")
         assert sim.call(f"app tron sign 0 {req['tron_trx']}") == sig["tron_trx"], "tron trx"
         assert sim.call(f"app tron sign 0 {req['tron_usdt']}") == sig["tron_usdt"], "tron usdt"
         assert sim.call(f"app bsc sign 0 {req['bsc_bnb']}") == sig["bsc_bnb"], "bsc bnb"
@@ -155,13 +157,9 @@ def check(binary, net, g):
         assert len(sigs) == len(ins)
         for k, s in enumerate(sigs):
             assert bip340_verify(spks[k][2:], bip341_sighash(preq, spks, k), s), f"prl sig {k}"
-        # и чужое подписать нельзя: сдача на чужой адрес
-        bad = bytearray(bytes.fromhex(req["btc"]))
-        bad[-30] ^= 1  # байт скрипта сдачи
-        assert sim.call(f"app btc sign {bad.hex()}").startswith("err "), "change mismatch"
         sim.p.stdin.close()
         sim.p.wait(5)
-        print(f"{net}: {n} адресов, xpub, подписи BTC/TRON/BSC — как у встроенных; Pearl — {len(sigs)} BIP340 верны")
+        print(f"{net}: {n} адресов, xpub, подписи TRON/BSC — как у встроенных; Pearl — {len(sigs)} BIP340 верны")
 
 
 def main():

@@ -56,7 +56,7 @@ MW_IMPORT("sha256") void mw_sha256(const void *data, size_t len, uint8_t out[32]
 MW_IMPORT("hash160") int mw_hash160(const void *data, size_t len, uint8_t out[20]);
 
 // ---- экраны ----
-// Шаги экрана проверки (до 20), затем mw_ui_confirm: «Review <что>», шаги, Accept/Reject.
+// Шаги экрана проверки (до 40), затем mw_ui_confirm: «Review <что>», шаги, Accept/Reject.
 MW_IMPORT("ui_field") void mw_ui_field(const char *title, size_t tl, const char *text, size_t vl);   // текст
 MW_IMPORT("ui_amount") void mw_ui_amount(const char *title, size_t tl, const char *text, size_t vl); // сумма крупно
 MW_IMPORT("ui_warn") void mw_ui_warn(const char *title, size_t tl, const char *text, size_t vl);    // предупреждение

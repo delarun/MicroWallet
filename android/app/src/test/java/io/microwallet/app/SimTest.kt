@@ -28,6 +28,7 @@ class FakeHttp(private val responses: JSONObject) : Http {
     }
 
     override fun get(url: String) = answer("GET $url")
+    override fun getText(url: String) = responses.getString("TEXT $url")
     override fun post(url: String, body: JSONObject) = answer("POST $url ${body.optString("method")}".trimEnd())
     override fun postRaw(url: String, raw: String) = responses.getString("RAW $url")
     override fun download(url: String, onProgress: (Long, Long) -> Unit) = throw AssertionError("download $url")
