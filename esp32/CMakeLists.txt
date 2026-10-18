@@ -5,6 +5,8 @@ cmake_minimum_required(VERSION 3.16)
 file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/../src/coins.h" _fw REGEX "define FW_VERSION")
 string(REGEX MATCH "\"([^\"]+)\"" _ "${_fw}")
 set(PROJECT_VER "${CMAKE_MATCH_1}")
+# coins.h изменился — перенастроить: иначе в заголовке образа останется старая версия
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/../src/coins.h")
 # Плата одна — ESP32-S3, «idf.py set-target» не нужен
 if(NOT DEFINED IDF_TARGET AND NOT DEFINED ENV{IDF_TARGET})
   set(IDF_TARGET "esp32s3")
