@@ -109,11 +109,16 @@ void hal_reboot_bootloader(void) {
   esp_restart();
 }
 
-const char *hal_platform(void) { return CONFIG_MW_HW_NAME; }  // "esp32s3", "esp32s3-ws147"
-
 // Для какой платы образ: телефон и ПК находят метку в *-app.bin и не дают поставить прошивку
 // другой платы (чип в заголовке у обеих один — esp32s3). Нет метки (до v0.9) — SuperMini.
-__attribute__((used)) static const char k_board_tag[] = "mw-board:" CONFIG_MW_HW_NAME ";";
+// hw= в info берётся из неё же: иначе компоновщик выбросит неиспользуемую строку.
+static const char k_board_tag[] = "mw-board:" CONFIG_MW_HW_NAME ";";
+
+const char *hal_platform(void) {  // "esp32s3", "esp32s3-ws147"
+  static char hw[sizeof k_board_tag];
+  if (!hw[0]) snprintf(hw, sizeof hw, "%.*s", (int)(sizeof k_board_tag - 11), k_board_tag + 9);
+  return hw;
+}
 
 const char *hal_fw_build(void) {
   static char id[9];
