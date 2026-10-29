@@ -1,14 +1,28 @@
-// button.h — единственная кнопка ввода (GPIO1 -> GND, BOOT параллельно)
+// button.h — ввод: единственная кнопка (GPIO1 -> GND, BOOT параллельно) и, где есть,
+// сенсорный экран. Касания переводятся в те же события, что и кнопка:
+//   свайп влево (вверх) или касание у правого края — BTN_TAP (дальше),
+//   свайп вправо (вниз) или касание у левого края  — BTN_PREV (назад),
+//   касание посередине — BTN_SELECT (выбрать, как удержание, но не подтверждение),
+//   палец держат на месте BTN_HOLD_MS — BTN_HOLD (как удержание кнопки).
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef enum { BTN_NONE = 0, BTN_TAP, BTN_HOLD } btn_t;
+typedef enum { BTN_NONE = 0, BTN_TAP, BTN_HOLD, BTN_PREV, BTN_SELECT } btn_t;
 
 #define BTN_HOLD_MS 750
 
 void btn_init(void);
-bool btn_pressed(void);
+bool btn_pressed(void);     // кнопка нажата или палец на экране
+bool btn_physical(void);    // только кнопка (PIN набирается кнопкой)
 btn_t btn_poll(void);     // неблокирующий, звать каждые ~10 мс
 btn_t btn_wait(void);     // ждать событие
 uint32_t btn_last_press_us(void);  // длительность последнего нажатия (для энтропии)
+
+// Сенсор: палец ведут по экрану (сдвинулся дальше порога) — сдвиг от точки касания, тысячные
+// доли экрана. Для карусели на главном экране: лента едет за пальцем.
+bool btn_drag(int *dx, int *dy);
+// Последний свайп, когда палец отпустили (BTN_TAP/BTN_PREV после btn_drag): был ли это свайп,
+// и скорость по горизонтали в тысячных долях экрана за секунду (влево — меньше нуля)
+bool btn_was_swipe(void);
+int btn_swipe_vx(void);

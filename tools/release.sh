@@ -37,21 +37,31 @@ build t "sdkconfig.defaults" testnet
 build m "sdkconfig.defaults;sdkconfig.mainnet" mainnet
 build ts "sdkconfig.defaults;sdkconfig.secure;$B/key.cfg" testnet-secure
 build ms "sdkconfig.defaults;sdkconfig.mainnet;sdkconfig.secure;$B/key.cfg" mainnet-secure
+# Waveshare ESP32-S3-Touch-LCD-1.47 (hw=esp32s3-ws147): цветной сенсорный экран, 16 МБ флеша
+build wt "sdkconfig.defaults;sdkconfig.ws147" ws147-testnet
+build wm "sdkconfig.defaults;sdkconfig.mainnet;sdkconfig.ws147" ws147-mainnet
+build wts "sdkconfig.defaults;sdkconfig.secure;sdkconfig.ws147;$B/key.cfg" ws147-testnet-secure
+build wms "sdkconfig.defaults;sdkconfig.mainnet;sdkconfig.secure;sdkconfig.ws147;$B/key.cfg" ws147-mainnet-secure
 # Загрузчик ESP-IDF доверяет ключу из слота eFuse №k, только если у образа есть блок
 # подписи №k (secure_boot_signatures_bootloader.c): релизный ключ — в слоте 1, поэтому
 # образу нужны блоки 0 и 1. Подписываем релизным ключом дважды — иначе обновление
 # запишется, а плата загрузит прежнюю прошивку.
-for n in testnet-secure mainnet-secure; do
+for n in testnet-secure mainnet-secure ws147-testnet-secure ws147-mainnet-secure; do
   f="$OUT/microwallet-esp32s3-$n-app.bin"
   espsecure.py sign_data --version 2 --append_signatures --keyfile "$KEY" -o "$f.2" "$f" >/dev/null
   mv "$f.2" "$f"
   [ "$(espsecure.py verify_signature --version 2 --keyfile "$KEY" "$f" 2>&1 | grep -c "verification successful")" = 2 ] \
     || { echo "$n: нужны две подписи релизным ключом"; exit 1; }
 done
-for v in "t testnet" "m mainnet"; do
+for v in "t testnet 4MB" "m mainnet 4MB" "wt ws147-testnet 16MB" "wm ws147-mainnet 16MB"; do
   set -- $v
   (cd "$B/$1" && esptool.py --chip esp32s3 merge_bin -o "$OUT/microwallet-esp32s3-$2-full.bin" \
-    --flash_mode dio --flash_size 4MB @flash_args 0x280000 "$D/microwallet-esp32s3-apps.bin" >/dev/null)
+    --flash_mode dio --flash_size "$3" @flash_args 0x280000 "$D/microwallet-esp32s3-apps.bin" >/dev/null)
+done
+# метка платы в образе (hal_esp.c): телефон и ПК по ней не дадут поставить чужую прошивку
+for n in testnet mainnet testnet-secure mainnet-secure; do
+  grep -q "mw-board:esp32s3;" "$OUT/microwallet-esp32s3-$n-app.bin" && grep -q "mw-board:esp32s3-ws147;" "$OUT/microwallet-esp32s3-ws147-$n-app.bin" \
+    || { echo "$n: нет метки платы в образе"; exit 1; }
 done
 cp "$D/microwallet-esp32s3-apps.bin" "$D/microwallet-esp32s3-partitions.bin" "$D/microwallet-esp32s3-otadata.bin" "$OUT/"
 cp apps/dist/microwallet-app-*.wasm "$OUT/"

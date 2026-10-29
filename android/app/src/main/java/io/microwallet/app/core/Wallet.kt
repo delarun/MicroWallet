@@ -8,6 +8,7 @@ import org.json.JSONObject
 import java.math.BigDecimal
 import java.math.BigInteger
 import java.math.RoundingMode
+import java.util.TimeZone
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.ceil
 
@@ -17,6 +18,29 @@ data class Utxo(
     val txid: String, val vout: Int, val value: Long, val confirmed: Boolean,
     val chain: Int, val index: Int, val address: String, val confirmations: Int = 0,
 )
+
+/** Суммы для экрана устройства: сначала сама монета, потом ненулевые токены, через ';',
+ *  до 120 символов (команда bal). */
+fun balanceText(coin: String, b: Balance): String? {
+    val native = b.assets.filter { it.id == nativeAsset(coin) }.ifEmpty { b.assets.take(1) }
+    val parts = (native + b.assets.filter { it !in native && it.amount.signum() > 0 })
+        .map { "${fmtUnits(it.amount, it.decimals)} ${it.symbol}" }
+        .filter { s -> s.all { it.code in 0x20..0x7e } && ';' !in s }
+    var text = ""
+    for (p in parts) {
+        val t = if (text.isEmpty()) p else "$text;$p"
+        if (t.length > 120) break
+        text = t
+    }
+    return text.ifEmpty { null }
+}
+
+const val BALANCE_RESEND_MS = 10 * 60 * 1000L
+
+/** TRC10-токен: кто угодно рассылает их по чужим адресам (спам без названия, «#1005193»), поэтому
+ *  на главной и на устройстве они — по настройке TRON «TRC10» (TRC10_TOKENS), по умолчанию скрыты. */
+fun isTrc10(id: String) = id.startsWith("trc10:")
+const val TRC10_TOKENS = "trc10"
 
 data class Balance(
     val address: String,
@@ -76,6 +100,8 @@ interface WalletApi {
     fun showAddress(coin: String, index: Int = 0): String
     /** skip — токены, баланс которых не запрашивать (убраны с главной). */
     fun balance(coin: String, skip: Set<String> = emptySet()): Balance
+    /** Запомнить баланс на устройстве (команда bal): его видно в меню монеты на самом устройстве. */
+    fun cacheBalance(coin: String, b: Balance) {}
     fun feeLevels(coin: String): Map<String, BigDecimal>
     fun prepareSend(req: SendRequest): Draft
     fun signAndSend(d: Draft, broadcast: Boolean = true): SendResult {
@@ -362,6 +388,24 @@ class Wallet(
         dev.call("addrs $n")
         refreshInfo()
         scans.clear()
+    }
+
+    // Что и когда уже отправлено на устройство: не писать его флеш без нужды
+    private val sentBalance = ConcurrentHashMap<String, Pair<String, Long>>()
+
+    override fun cacheBalance(coin: String, b: Balance) {
+        if (locked || !ready || legacy || coin !in coins) return
+        val text = balanceText(coin, b) ?: return
+        val now = System.currentTimeMillis()
+        val last = sentBalance[coin]
+        if (last != null && last.first == text && now - last.second < BALANCE_RESEND_MS) return
+        val local = (now + TimeZone.getDefault().getOffset(now)) / 1000  // устройство показывает как есть
+        try {
+            dev.call("bal $coin $local $text")
+            sentBalance[coin] = text to now
+        } catch (e: DeviceError) {
+            // прошивка без команды bal — баланс просто не кэшируется
+        }
     }
 
     override fun address(coin: String, index: Int, chain: Int): String {

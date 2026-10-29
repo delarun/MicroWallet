@@ -3,12 +3,15 @@ package io.microwallet.app
 import io.microwallet.app.ble.BleDevice
 import io.microwallet.app.ble.ChannelError
 import io.microwallet.app.ble.MemoryBondStore
+import io.microwallet.app.core.Asset
+import io.microwallet.app.core.Balance
 import io.microwallet.app.core.DeviceError
 import io.microwallet.app.core.Http
 import io.microwallet.app.core.LOCKED_MSG
 import io.microwallet.app.core.SendRequest
 import io.microwallet.app.core.Wallet
 import io.microwallet.app.core.WalletError
+import io.microwallet.app.core.balanceText
 import io.microwallet.app.core.info
 import io.microwallet.app.core.inspectApp
 import org.json.JSONObject
@@ -21,6 +24,7 @@ import org.junit.Before
 import org.junit.Test
 import java.io.File
 import java.math.BigDecimal
+import java.math.BigInteger
 
 /** Подменённая сеть: ответы из vectors.json (их записал gen_vectors.py). */
 class FakeHttp(private val responses: JSONObject) : Http {
@@ -190,6 +194,28 @@ class SimTest {
         val b = w.balance("tron", setOf("usdt"))
         assertEquals(listOf("trx"), b.assets.map { it.id })
         assertThrows(AssertionError::class.java) { w.balance("tron") }  // без skip пошёл бы запрос USDT
+        dev.close()
+    }
+
+    /** Баланс после обновления уходит на устройство (bal): монета первой, ненулевые токены, без
+     *  повтора того же текста; на устройстве он виден в меню монеты. */
+    @Test
+    fun cachedBalance() {
+        val dev = LineDevice(Sim.start("lines", Sim.newDir()))
+        dev.call("restore " + "00".repeat(16))
+        Wallet(dev, FakeHttp(JSONObject()), Sim.words).let { s -> for (f in Sim.apps) s.installApp(inspectApp(f.readBytes())) { _, _ -> } }
+        val w = Wallet(dev, FakeHttp(JSONObject()), Sim.words)
+        val b = Balance("T", listOf(
+            Asset("usdt", "USDT", 6, BigInteger.valueOf(12_500_000)),
+            Asset("trx", "TRX", 6, BigInteger.valueOf(5_000_000)),
+            Asset("usdc", "USDC", 6, BigInteger.ZERO)))
+        assertEquals("5 TRX;12.5 USDT", balanceText("tron", b))
+        w.cacheBalance("tron", b)
+        val stored = dev.call("bal tron").split(" ", limit = 2)
+        assertEquals("5 TRX;12.5 USDT", stored[1])
+        dev.call("bal tron 1 other")
+        w.cacheBalance("tron", b)  // тот же текст недавно — не переписываем флеш устройства
+        assertEquals("1 other", dev.call("bal tron"))
         dev.close()
     }
 

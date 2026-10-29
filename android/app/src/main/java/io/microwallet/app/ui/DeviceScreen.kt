@@ -78,6 +78,7 @@ fun DeviceScreen(vm: AppViewModel) {
             InfoRow("Прошивка", "v${info["fw"] ?: "?"}" + (info["build"]?.takeIf { it != "-" }?.let { " · $it" } ?: ""))
             InfoRow("Плата", when (info["hw"]) {
                 "esp32s3" -> "ESP32-S3"
+                "esp32s3-ws147" -> "Waveshare ESP32-S3 Touch LCD 1.47"
                 else -> info["hw"] ?: "?"
             })
             InfoRow("Сеть", info["net"] ?: w.net, if (w.net == "mainnet") C.ok else C.warn)

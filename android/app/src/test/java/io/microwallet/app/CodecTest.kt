@@ -6,6 +6,7 @@ import io.microwallet.app.core.evmChecksum
 import io.microwallet.app.core.evmDecode
 import io.microwallet.app.core.fmtUnits
 import io.microwallet.app.core.hex
+import io.microwallet.app.core.imageBoard
 import io.microwallet.app.core.mnemonicToEntropy
 import io.microwallet.app.core.rlp
 import io.microwallet.app.core.toUnits
@@ -108,5 +109,14 @@ class CodecTest {
     fun hexRoundTrip() {
         assertEquals("00ff10", "00ff10".unhex().hex())
         assertThrows(WalletError::class.java) { "0g".unhex() }
+    }
+
+    /** Плата образа: метка mw-board (с v0.9); старые образы без неё — для SuperMini (по чипу). */
+    @Test
+    fun imageBoardTag() {
+        val img = ByteArray(300) + "xx mw-board:esp32s3-ws147; yy".toByteArray()
+        assertEquals("esp32s3-ws147", imageBoard(img, "esp32s3"))
+        assertEquals("esp32s3", imageBoard(ByteArray(300), "esp32s3"))
+        assertEquals("esp32s3", imageBoard("mw-board:esp32s3;".toByteArray(), "?"))
     }
 }

@@ -44,6 +44,8 @@ import io.microwallet.app.core.inspectImage
 import io.microwallet.app.core.isAppAsset
 import io.microwallet.app.core.parseReleases
 import io.microwallet.app.core.releasesUrl
+import io.microwallet.app.core.TRC10_TOKENS
+import io.microwallet.app.core.isTrc10
 import org.json.JSONArray
 
 sealed interface Conn {
@@ -501,7 +503,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val w = wallet ?: return
         val skip = hiddenTokens(c)
         balances[c] = Load.Loading
-        run({ w.balance(c, skip) }, { if (wallet === w) balances[c] = Load.Ok(it) }, { if (wallet === w) balances[c] = Load.Err(it) })
+        run({ w.balance(c, skip).also { b -> runCatching { w.cacheBalance(c, visible(c, b)) } } },  // и на устройство: видно в меню монеты
+            { if (wallet === w) balances[c] = Load.Ok(it) }, { if (wallet === w) balances[c] = Load.Err(it) })
     }
 
     // ---------------- токены на главной ----------------
@@ -515,6 +518,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Токены монеты, убранные с главной. */
     fun hiddenTokens(coin: String): Set<String> =
         coinInfo(coin).tokensFor(wallet?.net ?: "testnet").filter { !tokenShown(coin, it) }.toSet()
+
+    /** Баланс так, как его показывать: TRC10 — только если включены в настройке TRON. */
+    fun visible(coin: String, b: Balance): Balance =
+        if (tokenShown(coin, TRC10_TOKENS)) b else b.copy(assets = b.assets.filterNot { isTrc10(it.id) })
 
     fun setTokenShown(coin: String, asset: String, show: Boolean) {
         shownTokens = if (show) shownTokens + "$coin:$asset" else shownTokens - "$coin:$asset"

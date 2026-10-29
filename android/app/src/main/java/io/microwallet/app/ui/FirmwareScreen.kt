@@ -73,6 +73,7 @@ class FwState {
 
 fun chipName(hw: String?) = when (hw) {
     "esp32s3" -> "ESP32-S3"
+    "esp32s3-ws147" -> "Waveshare ESP32-S3 Touch LCD 1.47"
     else -> hw ?: "?"
 }
 

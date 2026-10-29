@@ -3,11 +3,13 @@
 #   trezor-crypto        — crypto/ из trezor-firmware (MIT)
 #   wasm-micro-runtime   — движок WebAssembly для приложений (Apache-2.0 WITH LLVM-exception)
 #   sr25519-donna        — sr25519 (schnorrkel, Polkadot) на C (Apache-2.0)
+#   qrcodegen            — QR-коды адресов на цветном экране (Project Nayuki, MIT)
 # Уже скачанное не трогается; чтобы обновить — удали папку в lib/.
 set -e
 TREZOR_COMMIT=94de9b211277b80b28864cd04e6cb6a380a5903a
 WAMR_TAG=WAMR-2.4.4
 SR25519_COMMIT=e1e8c7df5dd822b402a4ebfc8746303193b9c665
+QRCODEGEN_TAG=v1.8.0
 cd "$(dirname "$0")"
 mkdir -p lib && cd lib
 
@@ -42,4 +44,17 @@ if [ ! -d sr25519-donna ]; then
   rm -rf .git
   cd ..
   echo "sr25519-donna -> lib/sr25519-donna"
+fi
+
+if [ ! -d qrcodegen ]; then
+  rm -rf QR-Code-generator
+  git clone --filter=blob:none --no-checkout --depth 1 --branch $QRCODEGEN_TAG \
+    https://github.com/nayuki/QR-Code-generator.git
+  cd QR-Code-generator
+  git sparse-checkout set c
+  git checkout -q $QRCODEGEN_TAG
+  cd ..
+  mv QR-Code-generator/c qrcodegen
+  rm -rf QR-Code-generator
+  echo "qrcodegen $QRCODEGEN_TAG -> lib/qrcodegen"
 fi

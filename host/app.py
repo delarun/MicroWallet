@@ -496,6 +496,9 @@ class DemoWallet:
         time.sleep(2.5)
         return self.address(coin, index)
 
+    def cache_balance(self, coin, b):
+        pass  # демо: устройства нет
+
     def balance(self, coin, index=0):
         time.sleep(random.uniform(.4, 1.2))
         a = {"btc": [{"id": "btc", "symbol": "tBTC", "decimals": 8, "amount": 4_120_000}],
@@ -637,7 +640,8 @@ class ChainCard(QFrame):
         self.net.setText(f"{CHAINS[self.coin]['net'][net]}")
         self.full_addr = b["address"]
         self.addr.setText(short(b["address"], 7))
-        for a in b["assets"]:
+        # TRC10 — почти всегда спам-«аирдропы» без названия (#1005193): не показываем, отправить можно
+        for a in [a for a in b["assets"] if not a["id"].startswith("trc10:")]:
             row = QFrame()
             row.setObjectName("inner")
             h = QHBoxLayout(row)
@@ -727,9 +731,18 @@ class OverviewPage(Page):
                 cardw.hide()
                 continue
             cardw.set_loading()
-            self.app.run(w.balance, coin,
+            self.app.run(self._load, coin,
                          done=lambda b, coin=coin: self._done(coin, b),
                          failed=lambda e, coin=coin: self.cards[coin].set_error(human(e)))
+
+    def _load(self, coin):
+        w = self.app.wallet
+        b = w.balance(coin)
+        try:  # и на устройство: видно в меню монеты (без TRC10 — их и на карточке нет)
+            w.cache_balance(coin, {**b, "assets": [a for a in b["assets"] if not a["id"].startswith("trc10:")]})
+        except Exception:  # noqa: BLE001 — баланс показать важнее, чем запомнить
+            pass
+        return b
 
     def _done(self, coin, b):
         self.balances[coin] = b
@@ -1460,7 +1473,8 @@ class DevicePage(Page):
                                      "padding: 3px 10px; font-size: 12px; font-weight: 700;")
         hw = i.get("hw", "?")
         ble_link = B is not None and isinstance(w.dev, B.BleDevice)
-        rows = [("Плата", {"esp32s3": "ESP32-S3 (аппаратный ГСЧ, Bluetooth, зарядка на плате)"}.get(hw, hw)),
+        rows = [("Плата", {"esp32s3": "ESP32-S3 (аппаратный ГСЧ, Bluetooth, зарядка на плате)",
+                           "esp32s3-ws147": "Waveshare ESP32-S3-Touch-LCD-1.47 (цветной сенсорный экран)"}.get(hw, hw)),
                 ("Связь", "Bluetooth, шифрованный канал" if ble_link else "USB"),
                 *([("Аккумулятор", "заряжается от USB")] if i.get("chg") == "1" else
                   [("Аккумулятор", battery_text(int(i["batt"])))] if int(i.get("batt", -1)) > 0 else []),

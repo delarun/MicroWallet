@@ -10,6 +10,9 @@
 //   fingerprint                  отпечаток мастер-ключа (PSBT, дескрипторы)
 //   btcd <i[h]> ...              совпадёт ли вывод пути у btcd/Pearl Wallet: ok same | ok differs
 //   addrs <1|5|10|20>            сколько адресов для получения
+//   bal <app> [<when> <text>]    кэш баланса для меню монеты: when — местное время телефона
+//                                (секунды с 1970), text — суммы через ';' («0.5 ETH;120 USDT»);
+//                                без when — прочитать: ok <when> <text> | err none
 //   apps | app ...               приложения WebAssembly — протокол в apps.h
 //   ota ...                      обновление прошивки (esp32/main/ota.h)
 //   Монеты — приложения: app btc|prl|tron|bsc|eth addr|show|sign …, форматы — в начале
@@ -133,10 +136,13 @@ static bool quiz_word(int idx, const char *correct) {
   }
   char title[24];
   snprintf(title, sizeof title, "Word #%d is...?", idx + 1);
-  for (int k = 0;; k = (k + 1) % 3) {
+  for (int k = 0;;) {
     ui_word(title, opt[k], k, 3);
     oled_show();
-    if (btn_wait() == BTN_HOLD) return k == pos;
+    btn_t b = btn_wait();
+    if (b == BTN_HOLD || b == BTN_SELECT) return k == pos;
+    ui_anim_btn(b);
+    k = (k + (b == BTN_PREV ? 2 : 1)) % 3;
   }
 }
 
@@ -181,12 +187,15 @@ bool app_create_wallet(void) {
 
   for (;;) {
     ux_flash(ICON_PEN, "Write down", "12 words on paper", 0);
-    for (int i = 0; i < 12; i++) {
+    for (int i = 0; i < 12;) {
       char title[24];
       snprintf(title, sizeof title, "Word %d of 12", i + 1);
       ui_word(title, words[i], i, 12);
       oled_show();
-      btn_wait();
+      btn_t b = btn_wait();
+      ui_anim_btn(b == BTN_PREV ? BTN_PREV : BTN_TAP);
+      if (b == BTN_PREV) i = i ? i - 1 : 0;  // свайп назад — предыдущее слово
+      else i++;
     }
     ux_flash(ICON_EYE, "Check backup", "hold on right word", 0);
     int a = rand32() % 12, b;
@@ -550,6 +559,38 @@ static void handle(char *line) {
     else reply(same ? "ok same" : "ok differs");
     return;
   }
+  if (!strcmp(cmd, "bal")) {
+    char *when = strtok(NULL, " "), *text = strtok(NULL, "");
+    const mwapp_t *a = NULL;
+    for (int i = 0; a1 && i < apps_count(); i++)
+      if (!strcmp(apps_get(i)->id, a1)) a = apps_get(i);
+    if (!a) {
+      reply("err usage: bal <installed app> [<when> <text>]");
+      return;
+    }
+    if (!when) {
+      char t[BAL_TEXT_MAX + 1];
+      uint32_t w;
+      if (storage_balance_load(a->id, &w, t, sizeof t)) reply("ok %lu %s", (unsigned long)w, t);
+      else reply("err none");
+      return;
+    }
+    if (!wallet_is_unlocked()) {
+      reply("err no wallet on device");
+      return;
+    }
+    char *e;
+    unsigned long w = strtoul(when, &e, 10);
+    bool ok = e != when && !*e && text && strlen(text) <= BAL_TEXT_MAX;
+    for (const char *c = text; ok && *c; c++) ok = *c >= 0x20 && *c < 0x7f;  // только печатный ASCII
+    if (!ok) reply("err usage: bal <app> <when> <text, up to 120 chars>");
+    else if (!storage_balance_save(a->id, (uint32_t)w, text)) reply("err storage");
+    else {
+      reply("ok");
+      menu_balance_changed(a->id);
+    }
+    return;
+  }
   if (!strcmp(cmd, "addrs")) {  // addrs <1|5|10|20>: сколько адресов для получения
     if (!a1 || !menu_set_addr_count(atoi(a1))) {
       reply("err usage: addrs 1|5|10|20");
@@ -707,6 +748,7 @@ void app_tick(void) {
     if (swallow) swallow = false;
     else menu_event(b);
   }
+  if (!oled_is_asleep() && !swallow) menu_touch();
   uint32_t off = menu_screen_off_ms();
   if (off && !oled_is_asleep() && idle_longer(now, off)) oled_sleep();
 

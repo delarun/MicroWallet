@@ -40,8 +40,30 @@ void ui_carousel(const uint8_t *icon, const char *title, const char *sub, int id
   dots(idx, count, DOTS_Y);
 }
 
-void ui_dashboard(const uint8_t *const icons[], int count, int sel, const char *title,
-                  const char *sub) {
+bool ui_dashboard_at(float pos) {
+  (void)pos;
+  return false;
+}
+
+// Строка иконок — окно до 9 штук вокруг выбранной, если приложений много
+static void dash_row(const uint8_t *const icons[], int count, int sel, const char *title,
+                     const char *sub);
+
+void ui_dashboard(const uint8_t *const all[], const char *const names[], int n, int dash_i,
+                  const char *title, const char *sub) {
+  (void)names;
+  enum { VISIBLE = 9 };
+  int first = 0, shown = n < VISIBLE ? n : VISIBLE;
+  if (n > VISIBLE) {
+    first = dash_i - VISIBLE / 2;
+    if (first < 0) first = 0;
+    if (first > n - VISIBLE) first = n - VISIBLE;
+  }
+  dash_row(all + first, shown, dash_i - first, title, sub);
+}
+
+static void dash_row(const uint8_t *const icons[], int count, int sel, const char *title,
+                     const char *sub) {
   gfx_clear();
   // слоты одинаковой ширины по всей строке, иконки по центрам слотов
   int slot = GFX_W / (count < 5 ? 5 : count);
@@ -58,18 +80,6 @@ void ui_dashboard(const uint8_t *const icons[], int count, int sel, const char *
   }
   gfx_text_center(TALL ? 36 : 16, title, GFX_BOLD);
   if (sub) gfx_text_center(TALL ? 48 : 24, sub, GFX_NORMAL);
-}
-
-// Заряд Li-ion по напряжению без нагрузки (кривая разряда, линейно между точками).
-// 0% — 3.5 В: ниже плата не работает (диод ~0.35 В и стабилизатор 3.3 В между ними).
-int ui_battery_pct(int mv) {
-  static const int16_t v[] = {3500, 3600, 3700, 3750, 3800, 3850, 3900, 4000, 4100, 4200};
-  static const uint8_t p[] = {0, 8, 20, 30, 40, 50, 60, 75, 90, 100};
-  if (mv < 0) return -1;
-  if (mv <= v[0]) return 0;
-  for (int i = 1; i < (int)sizeof v / 2; i++)
-    if (mv <= v[i]) return p[i - 1] + (p[i] - p[i - 1]) * (mv - v[i - 1]) / (v[i] - v[i - 1]);
-  return 100;
 }
 
 // Значок батареи 12x7: корпус, «носик» справа, заливка по проценту
@@ -244,6 +254,39 @@ void ui_field(const uint8_t *icon, const char *title, const char *value,
   }
   dots(idx, count, TALL ? DOTS_Y : 29);
 }
+
+// OLED: суммы через запятую в поле, по страницам
+static const char *balance_line(const char *text) {
+  static char b[160];
+  int o = 0;
+  for (const char *c = text; *c && o < (int)sizeof b - 3; c++) {
+    if (*c == ';') {
+      b[o++] = ',';
+      b[o++] = ' ';
+    } else {
+      b[o++] = *c;
+    }
+  }
+  b[o] = 0;
+  return b;
+}
+
+void ui_balance(const uint8_t *icon, const char *when, const char *text, int page, int pages) {
+  char t[32];
+  snprintf(t, sizeof t, "Balance %s", when);
+  ui_field(icon, t, balance_line(text), page, pages, -1, 0);
+}
+
+int ui_balance_pages(const char *text) { return ui_pages(balance_line(text)); }
+
+void ui_anim(int kind) { (void)kind; }  // на OLED кадр меняется сразу
+void ui_anim_btn(int btn) { (void)btn; }
+
+void ui_receive(const uint8_t *icon, const char *title, const char *addr, int page, int pages) {
+  ui_field(icon, title, addr, page, pages, -1, 0);
+}
+
+int ui_receive_pages(const char *addr) { return ui_pages(addr); }
 
 void ui_amount(const uint8_t *icon, const char *title, const char *value, int idx, int count) {
   if (strlen(value) > 10) {

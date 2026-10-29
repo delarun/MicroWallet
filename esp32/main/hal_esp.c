@@ -1,6 +1,8 @@
-// hal_esp.c — ESP32-S3 SuperMini (пины — menuconfig → MicroWallet)
+// hal_esp.c — ESP32-S3 SuperMini или Waveshare 1.47 (пины — menuconfig → MicroWallet)
 //   экран SDA=GPIO8 SCL=GPIO9; кнопка GPIO1 -> GND (будит из сна), BOOT (GPIO0)
 //   параллельно; аккумулятор: делитель VBUS/2 на плате (PR1/PR2) -> GPIO3
+//   Waveshare 1.47: экран JD9853 по SPI (lcd_jd9853.c), кнопка BOOT (GPIO0, будит из сна),
+//   аккумулятор: делитель BAT/3 -> GPIO12 (АЦП2)
 //   ГСЧ: аппаратный TRNG. Он «истинный», когда работает радио (BLE);
 //   если BLE выключен, на время генерации seed включаем внутренний источник шума.
 #include <stdio.h>
@@ -60,7 +62,18 @@ void hal_btn_init(void) {
       .pull_up_en = GPIO_PULLUP_ENABLE,
   };
   gpio_config(&c);
+#if CONFIG_MW_BOARD_WS147
+  touch_init();
+#endif
 }
+
+#if !CONFIG_MW_BOARD_WS147
+bool hal_touch(int *x, int *y) {  // сенсора нет; у Waveshare — touch_axs5106l.c
+  (void)x;
+  (void)y;
+  return false;
+}
+#endif
 
 // Внешняя кнопка и BOOT — одна и та же кнопка
 bool hal_btn_raw(void) {
@@ -96,7 +109,11 @@ void hal_reboot_bootloader(void) {
   esp_restart();
 }
 
-const char *hal_platform(void) { return CONFIG_IDF_TARGET; }  // "esp32s3"
+const char *hal_platform(void) { return CONFIG_MW_HW_NAME; }  // "esp32s3", "esp32s3-ws147"
+
+// Для какой платы образ: телефон и ПК находят метку в *-app.bin и не дают поставить прошивку
+// другой платы (чип в заголовке у обеих один — esp32s3). Нет метки (до v0.9) — SuperMini.
+__attribute__((used)) static const char k_board_tag[] = "mw-board:" CONFIG_MW_HW_NAME ";";
 
 const char *hal_fw_build(void) {
   static char id[9];
@@ -145,13 +162,17 @@ int hal_battery_mv(void) {
   static bool ready, failed;
   if (failed) return -1;
   if (!ready) {
+    // АЦП1 (SuperMini, GPIO3) или АЦП2 (Waveshare 1.47, GPIO12): без Wi-Fi АЦП2 свободен
     adc_unit_t unit;
-    adc_oneshot_unit_init_cfg_t ucfg = {.unit_id = ADC_UNIT_1};
+    if (adc_oneshot_io_to_channel(CONFIG_MW_BATT_GPIO, &unit, &ch) != ESP_OK) {
+      failed = true;
+      return -1;
+    }
+    adc_oneshot_unit_init_cfg_t ucfg = {.unit_id = unit};
     adc_oneshot_chan_cfg_t ccfg = {.atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_DEFAULT};
     adc_cali_curve_fitting_config_t kcfg = {
-        .unit_id = ADC_UNIT_1, .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_DEFAULT};
-    if (adc_oneshot_io_to_channel(CONFIG_MW_BATT_GPIO, &unit, &ch) != ESP_OK || unit != ADC_UNIT_1 ||
-        adc_oneshot_new_unit(&ucfg, &adc) != ESP_OK ||
+        .unit_id = unit, .chan = ch, .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_DEFAULT};
+    if (adc_oneshot_new_unit(&ucfg, &adc) != ESP_OK ||
         adc_oneshot_config_channel(adc, ch, &ccfg) != ESP_OK ||
         adc_cali_create_scheme_curve_fitting(&kcfg, &cali) != ESP_OK) {
       failed = true;
@@ -207,6 +228,16 @@ void hal_power_off(void) {
   rtc_gpio_pulldown_dis(CONFIG_MW_BTN_GPIO);
   esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
   esp_sleep_enable_ext1_wakeup_io(1ULL << CONFIG_MW_BTN_GPIO, ESP_EXT1_WAKEUP_ANY_LOW);
+#if CONFIG_MW_BOARD_WS147
+  // Подсветка экрана (GPIO46): во сне ШИМ останавливается — держим пин в нуле;
+  // сенсор — в сбросе (GPIO47 в нуле), так он почти не потребляет
+  gpio_set_direction(LCD_BL_GPIO, GPIO_MODE_OUTPUT);
+  gpio_set_level(LCD_BL_GPIO, 0);
+  gpio_hold_en(LCD_BL_GPIO);
+  gpio_set_level(TP_RST_GPIO, 0);
+  gpio_hold_en(TP_RST_GPIO);
+  gpio_deep_sleep_hold_en();
+#endif
   esp_deep_sleep_start();
 }
 
@@ -273,6 +304,10 @@ bool hal_resumed(void) {
 // После пробуждения пин ещё в режиме RTC — вернуть его обычному GPIO
 static void btn_from_rtc(void) {
   if (rtc_gpio_is_valid_gpio(CONFIG_MW_BTN_GPIO)) rtc_gpio_deinit(CONFIG_MW_BTN_GPIO);
+#if CONFIG_MW_BOARD_WS147
+  gpio_hold_dis(LCD_BL_GPIO);
+  gpio_hold_dis(TP_RST_GPIO);
+#endif
 }
 
 // ---------- приложения: раздел "apps" ----------

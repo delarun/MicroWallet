@@ -2,6 +2,10 @@
 //   gcc -Isrc tools/oled_preview.c src/gfx.c src/ui.c src/icons.c -o preview            (128x64)
 //   gcc -Isrc -DGFX_H=32 tools/oled_preview.c src/gfx.c src/ui.c src/icons.c -o preview (128x32)
 //   ./preview out/ && python3 tools/oled_preview.py out/ screens.png
+// Цветной интерфейс Waveshare 1.47 (src/ui_lcd.c, 320x172):
+//   gcc -Isrc -Ilib/qrcodegen -DUI_LCD tools/oled_preview.c src/ui_lcd.c src/draw.c src/fonts_lcd.c
+//       src/icons.c lib/qrcodegen/qrcodegen.c -lm -o preview
+//   ./preview out/ && python3 tools/oled_preview.py out/ screens.png
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -14,6 +18,27 @@
 static const char *dir;
 static int n;
 
+#ifdef UI_LCD
+#include "draw.h"
+
+static void save(const char *label) {  // кадр PPM + подпись
+  char path[512];
+  snprintf(path, sizeof path, "%s/%02d.ppm", dir, n);
+  FILE *f = fopen(path, "wb");
+  fprintf(f, "P6\n%d %d\n255\n", LCD_W, LCD_H);
+  for (int i = 0; i < LCD_W * LCD_H; i++) {
+    uint16_t c = lcd_fb[i];
+    fputc((c >> 11) * 255 / 31, f);
+    fputc((c >> 5 & 63) * 255 / 63, f);
+    fputc((c & 31) * 255 / 31, f);
+  }
+  fclose(f);
+  snprintf(path, sizeof path, "%s/%02d.txt", dir, n++);
+  f = fopen(path, "wb");
+  fwrite(label, 1, strlen(label), f);
+  fclose(f);
+}
+#else
 static void save(const char *label) {
   char path[512];
   snprintf(path, sizeof path, "%s/%02d.bin", dir, n++);
@@ -23,23 +48,31 @@ static void save(const char *label) {
   fwrite(label, 1, strlen(label), f);
   fclose(f);
 }
+#endif
 
 int main(int argc, char **argv) {
   dir = argc > 1 ? argv[1] : ".";
+#ifdef UI_LCD
+  draw_init();
+#endif
   const char *addr = "tprl1pr6yuq8u2r95wjzzgpdy8cpnncpl7l8zgy6x5q0367pnc53s2famqg7pt74";
 
   ui_splash(FW_VERSION, "testnet");                                     save("Заставка");
   const uint8_t *dash[] = {ICON_BTC, ICON_PRL, ICON_TRON, ICON_BSC, ICON_GEAR};
-  ui_dashboard(dash, 5, 0, "Bitcoin", "BTC  mainnet");
+  const char *names[] = {"Bitcoin", "Pearl", "TRON", "BNB Chain", "Settings"};
+  ui_dashboard(dash, names, 5, 0, "Bitcoin", "BTC  mainnet");
   ui_status("mainnet", true, false, true, 72);                       save("Главный экран: Bitcoin");
-  ui_dashboard(dash, 5, 1, "Pearl", "PRL  mainnet");
+  ui_dashboard(dash, names, 5, 1, "Pearl", "PRL  mainnet");
   ui_status("mainnet", true, true, false, 18);                       save("Главный экран: Pearl (BLE подключён)");
-  ui_dashboard(dash, 5, 2, "TRON", "TRX  USDT  mainnet");           save("Главный экран: TRON");
-  ui_dashboard(dash, 5, 3, "BNB Chain", "BNB  USDT  mainnet");      save("Главный экран: BNB Chain");
-  ui_dashboard(dash, 5, 4, "Settings", "brightness, wipe");         save("Главный экран: Settings");
+  ui_dashboard(dash, names, 5, 2, "TRON", "TRX  USDT  mainnet");           save("Главный экран: TRON");
+  ui_dashboard(dash, names, 5, 3, "BNB Chain", "BNB  USDT  mainnet");      save("Главный экран: BNB Chain");
+  ui_dashboard(dash, names, 5, 4, "Settings", "brightness, wipe");         save("Главный экран: Settings");
   ui_carousel(ICON_RECEIVE, "Receive", "Show address", 0, 3);      save("Pearl: получить");
   ui_carousel(ICON_INFO, "Info", "m/86'/1'/0'", 1, 3);             save("Pearl: инфо");
   ui_carousel(ICON_BACK, "Back", NULL, 2, 3);                      save("Pearl: назад");
+  ui_receive(ICON_PRL, "Pearl #0", addr, 0, ui_receive_pages(addr));  save("Получить: Pearl");
+  ui_receive(ICON_BTC, "Bitcoin #3", "tb1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu", 0, 1);  save("Получить: Bitcoin");
+  ui_receive(ICON_COIN, "TON #0", "0QBmSEEMnOtOU7DR8Uh0OHJEmXb6jaN7WyAJsdBvxbG8hc-z", 0, 1);  save("Получить: TON");
   ui_field(ICON_PRL, "Pearl #0", addr, 0, ui_pages(addr), -1, 0);  save("Адрес, стр. 1");
   if (ui_pages(addr) > 1) {
     ui_field(ICON_PRL, "Pearl #0", addr, 1, ui_pages(addr), -1, 0);
@@ -70,7 +103,8 @@ int main(int argc, char **argv) {
   ui_carousel(ICON_BATT, "Battery", "3.92 V  65%", 2, 8);          save("Настройки: аккумулятор");
   ui_carousel(ICON_TRASH, "Wipe device", "erase the seed", 3, 5);  save("Настройки: сброс");
   const uint8_t *empty[] = {ICON_PLUS, ICON_GEAR};
-  ui_dashboard(empty, 2, 0, "New wallet", "hold to create");       save("Нет кошелька");
+  const char *empty_names[] = {"New wallet", "Settings"};
+  ui_dashboard(empty, empty_names, 2, 0, "New wallet", "hold to create");       save("Нет кошелька");
   ui_carousel(ICON_BT, "Pair with PC?", "Bluetooth", 0, 4);        save("BLE: сопряжение");
   ui_amount(ICON_KEY, "Code", "761 828", 1, 4);                    save("BLE: код");
   ui_carousel(ICON_CHECK, "Pair", "if codes match", 2, 4);         save("BLE: подтвердить");

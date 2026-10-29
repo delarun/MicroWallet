@@ -36,6 +36,14 @@ typedef struct {
 void settings_load(settings_t *s);  // при ошибке — значения по умолчанию
 bool settings_save(const settings_t *s);
 
+// Баланс монеты, присланный телефоном или ПК (команда bal), — чтобы видеть его на устройстве в
+// меню монеты. when — местное время обновления (секунды с 1970, часы телефона), text — суммы
+// через ';'. Стирается вместе с seed (storage_save, storage_wipe): у другого кошелька он другой.
+#define BAL_TEXT_MAX 120
+bool storage_balance_load(const char *id, uint32_t *when, char *text, size_t len);
+bool storage_balance_save(const char *id, uint32_t when, const char *text);
+void storage_balance_clear(void);
+
 // Порядок приложений на главном экране: id через запятую. Нет — пустая строка.
 void apps_order_load(char *out, size_t len);
 bool apps_order_save(const char *s);

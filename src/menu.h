@@ -12,6 +12,8 @@ void menu_reset(void);          // на главный экран
 void menu_draw(void);           // нарисовать текущий экран и показать
 bool menu_on_dashboard(void);   // сейчас главный экран (там строка статуса)
 void menu_event(btn_t b);
+void menu_touch(void);
+void menu_balance_changed(const char *id);  // пришёл баланс монеты (команда bal): обновить экран          // палец ведут по экрану: карусель главного экрана едет за ним
 uint32_t menu_screen_off_ms(void);  // через сколько гасить экран и спать (0 = никогда)
 uint32_t menu_power_off_ms(void);   // через сколько выключаться (глубокий сон; 0 = никогда)
 int menu_addr_count(void);          // адресов для получения: 1, 5, 10 или 20

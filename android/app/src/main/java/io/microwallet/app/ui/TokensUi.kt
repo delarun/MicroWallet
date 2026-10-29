@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -20,6 +21,7 @@ import androidx.compose.ui.unit.sp
 import io.microwallet.app.core.COINS
 import io.microwallet.app.core.coinInfo
 import io.microwallet.app.core.tokensFor
+import io.microwallet.app.core.TRC10_TOKENS
 
 @Composable
 fun TokensCard(vm: AppViewModel) {
@@ -46,6 +48,21 @@ fun TokensCard(vm: AppViewModel) {
                 Text(w.symbol(t), color = C.text, fontSize = 15.sp, modifier = Modifier.weight(1f))
                 Switch(
                     checked = vm.tokenShown(c, t), onCheckedChange = { vm.setTokenShown(c, t, it) },
+                    colors = SwitchDefaults.colors(checkedTrackColor = C.accent),
+                )
+            }
+            if (c == "tron") Row(  // TRC10: их рассылают по чужим адресам, обычно это спам без названия
+                Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CoinIcon("tron", 24.dp)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("TRC10", color = C.text, fontSize = 15.sp)
+                    Text("токены без названия (#1005193) — чаще всего спам", color = C.faint, fontSize = 12.sp)
+                }
+                Switch(
+                    checked = vm.tokenShown(c, TRC10_TOKENS), onCheckedChange = { vm.setTokenShown(c, TRC10_TOKENS, it) },
                     colors = SwitchDefaults.colors(checkedTrackColor = C.accent),
                 )
             }

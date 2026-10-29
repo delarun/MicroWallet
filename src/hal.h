@@ -17,6 +17,9 @@ void hal_entropy(uint8_t out[32]);
 
 void hal_btn_init(void);
 bool hal_btn_raw(void);  // кнопка нажата
+// Сенсорный экран (Waveshare 1.47): палец на экране -> true и точка в тысячных долях экрана,
+// как его видит пользователь (x 0..999 слева направо, y 0..999 сверху вниз). Без сенсора — false.
+bool hal_touch(int *x, int *y);
 
 void hal_i2c_init(void);
 bool hal_i2c_write(const uint8_t *buf, size_t len);  // на адрес экрана 0x3C; false — сбой шины

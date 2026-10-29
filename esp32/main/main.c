@@ -16,6 +16,7 @@
 #include "esp_ota_ops.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "hal.h"
 #include "memzero.h"
@@ -79,6 +80,35 @@ static bool ext_line(char *line, app_reply_fn out) {
 }
 
 // Построчное чтение USB Serial/JTAG
+// Кошелёк (seed, приложения, меню, экран) — общий для команд и экрана, но не потокобезопасный:
+// задачи берут его по очереди. Команда держит его целиком (и подтверждение на экране внутри
+// неё), экран — один тик app_tick.
+static SemaphoreHandle_t g_core;
+#define UI_STACK (20 * 1024)  // как у app_main: из меню запускаются приложения и подтверждения
+#define UI_PRIO 6             // выше команд (1) и USB (5): после команды экран получает ход первым
+
+static void ui_task(void *arg) {
+  for (;;) {
+    xSemaphoreTake(g_core, portMAX_DELAY);
+    // Новая прошивка годная, если проработала 30 с: упадёт раньше — загрузчик вернёт
+    // прошлую (с Secure Boot иначе её не спасти). Перед выключением — hal_power_off.
+    static bool valid;
+    if (!valid && hal_time_us() > 30 * 1000000ULL) {
+      esp_ota_mark_app_valid_cancel_rollback();
+      valid = true;
+    }
+    app_tick();
+    ota_tick();
+#if CONFIG_PM_ENABLE
+    usb_pm_update();
+#endif
+    bool slow = hal_power_saving();
+    xSemaphoreGive(g_core);
+    // Во сне просыпаемся реже: кнопка всё равно разбудит, команда — тоже
+    vTaskDelay(pdMS_TO_TICKS(slow ? 100 : 5));
+  }
+}
+
 static void usb_task(void *arg) {
   static char line[APP_LINE_MAX];
   size_t len = 0;
@@ -146,33 +176,28 @@ void app_main(void) {
   app_set_ext(ext_line);
   app_init();
   hal_boot_stage(5);
+  g_core = xSemaphoreCreateMutex();
+  // Экран, сенсор и кнопка — на ядре 1; команды по USB и BLE (и сам Bluetooth) — на ядре 0.
+  // Раньше всё шло одним циклом: пока телефон спрашивал пачку адресов, до сенсора очередь
+  // не доходила, и экран лагал.
+  xTaskCreatePinnedToCore(ui_task, "ui", UI_STACK, NULL, UI_PRIO, NULL, 1);
   for (;;) {
-    // Новая прошивка годная, если проработала 30 с: упадёт раньше — загрузчик вернёт
-    // прошлую (с Secure Boot иначе её не спасти). Перед выключением — hal_power_off.
-    static bool valid;
-    if (!valid && hal_time_us() > 30 * 1000000ULL) {
-      esp_ota_mark_app_valid_cancel_rollback();
-      valid = true;
-    }
     msg_t m;
-    while (xQueueReceive(q, &m, 0) == pdTRUE) {
-      if (m.src == MW_SRC_USB) app_line((char *)m.data, usb_reply);
-      else if (m.src == MW_SRC_BLE) chan_frame(m.data, m.len, ble_send_frame);
-      else {
-        chan_reset();
-        ota_link_lost();  // соединение BLE закрыто — обновление по нему не закончится
-      }
-      if (m.data) {
-        memzero(m.data, m.len);
-        free(m.data);
-      }
+    if (xQueueReceive(q, &m, portMAX_DELAY) != pdTRUE) continue;
+    xSemaphoreTake(g_core, portMAX_DELAY);
+    if (m.src == MW_SRC_USB) app_line((char *)m.data, usb_reply);
+    else if (m.src == MW_SRC_BLE) chan_frame(m.data, m.len, ble_send_frame);
+    else {
+      chan_reset();
+      ota_link_lost();  // соединение BLE закрыто — обновление по нему не закончится
     }
-    app_tick();
-    ota_tick();
-#if CONFIG_PM_ENABLE
-    usb_pm_update();
-#endif
-    // Во сне просыпаемся реже: кнопка всё равно разбудит, команда — тоже
-    vTaskDelay(pdMS_TO_TICKS(hal_power_saving() ? 100 : 5));
+    xSemaphoreGive(g_core);  // по одной команде: между ними экран успевает своё
+    if (m.data) {
+      memzero(m.data, m.len);
+      free(m.data);
+    }
+    // Мьютекс не очередь: не дать себе же сразу забрать его снова, пока задача экрана
+    // на другом ядре только просыпается
+    if (uxQueueMessagesWaiting(q)) vTaskDelay(1);
   }
 }

@@ -7,6 +7,35 @@ config MW_MAINNET
         По умолчанию testnet. Без шифрования флеша (sdkconfig.secure) seed
         хранится в NVS в открытом виде.
 
+choice MW_BOARD
+    prompt "Плата"
+    default MW_BOARD_SUPERMINI
+    help
+        От платы зависят экран, кнопка и измерение батареи.
+
+config MW_BOARD_SUPERMINI
+    bool "ESP32-S3 SuperMini + SSD1306 128x64 (I2C), кнопка на GPIO1"
+
+config MW_BOARD_WS147
+    bool "Waveshare ESP32-S3-Touch-LCD-1.47: JD9853 172x320 (SPI), кнопка BOOT"
+    help
+        Экран 320x172 в горизонтальной ориентации; интерфейс 128x64 увеличен вдвое.
+        Кнопка — BOOT (GPIO0), батарея — делитель 200k/100k на GPIO12 (АЦП2).
+
+endchoice
+
+config MW_HW_NAME
+    string
+    default "esp32s3-ws147" if MW_BOARD_WS147
+    default "esp32s3"
+    help
+        hw= в info: по нему телефон и ПК выбирают образ прошивки для этой платы.
+
+config MW_LCD_FLIP
+    bool "Повернуть экран на 180°"
+    default n
+    depends on MW_BOARD_WS147
+
 config MW_OLED_SDA
     int "GPIO SDA экрана"
     default 8
@@ -23,8 +52,9 @@ config MW_OLED_I2C_HZ
 
 config MW_BTN_GPIO
     int "GPIO кнопки (замыкает на GND)"
+    default 0 if MW_BOARD_WS147
     default 1
-    range 1 21
+    range 0 21
     help
         Кнопка между этим GPIO и GND; она же будит из выключения (глубокого сна):
         будить могут только RTC-пины GPIO0..21. Не GPIO0: это BOOT, пин выбора
@@ -45,7 +75,8 @@ config MW_BATT_ENABLE
         и заведён на GPIO3. Меньше 2.5 В — значок батареи не показывается.
 
 config MW_BATT_GPIO
-    int "GPIO делителя (АЦП1: GPIO1..10)"
+    int "GPIO делителя (АЦП1: GPIO1..10, АЦП2: GPIO11..20)"
+    default 12 if MW_BOARD_WS147
     default 3
     depends on MW_BATT_ENABLE
 
@@ -53,6 +84,7 @@ config MW_BATT_DIVIDER_X100
     int "Коэффициент делителя x100"
     # Делитель 100k/100k без конденсатора, АЦП занижает ~в 0.8 раза.
     # Откалибровано: аккумулятор 3.93 В (мультиметр) и USB 5.0 В сходятся при 250.
+    default 300 if MW_BOARD_WS147
     default 250
     depends on MW_BATT_ENABLE
 
@@ -63,6 +95,7 @@ config MW_BATT_USB_MV
 
 config MW_BATT_OFFSET_MV
     int "Поправка к напряжению, мВ (падение на диоде между аккумулятором и VBUS)"
+    default 0 if MW_BOARD_WS147
     default 350
     depends on MW_BATT_ENABLE
 

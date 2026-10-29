@@ -92,7 +92,7 @@ void pin_entry_start(pin_entry_t *e, const char *title) {
   memset(e, 0, sizeof *e);
   e->title = title;
   e->level = -1;
-  e->wait_release = btn_pressed();  // удержание «Accept» ещё не отпущено
+  e->wait_release = btn_physical();  // удержание «Accept» ещё не отпущено
   e->dirty = true;
   e->t_idle = hal_time_us();
 }
@@ -101,7 +101,7 @@ bool pin_entry_step(pin_entry_t *e) {
 #ifdef MW_SIM
   if (sim_pin_typed(e->d)) return true;
 #endif
-  bool p = btn_pressed();
+  bool p = btn_physical();  // цифры — только кнопкой
   uint64_t now = hal_time_us();
   if (e->wait_release) {
     if (!p) e->wait_release = false;

@@ -2,7 +2,15 @@
 set(PW ${CMAKE_CURRENT_LIST_DIR}/../..)
 set(TC ${PW}/lib/trezor-crypto)
 
-set(CORE app apps channel menu ux ui gfx icons oled button pin wallet schnorr sr25519_glue)
+set(CORE app apps channel menu ux gfx icons button pin wallet schnorr sr25519_glue)
+# Экран: SSD1306 по I2C (src/oled.c) с интерфейсом 128x64 (src/ui.c) или у Waveshare 1.47 —
+# JD9853 по SPI с цветным интерфейсом 320x172 (src/ui_lcd.c) и сенсором (hal_touch)
+if(CONFIG_MW_BOARD_WS147)
+  set(DISPLAY_SRC lcd_jd9853.c touch_axs5106l.c ${PW}/lib/qrcodegen/qrcodegen.c)  # QR адреса
+  list(APPEND CORE ui_lcd draw fonts_lcd)
+else()
+  list(APPEND CORE ui oled)
+endif()
 list(TRANSFORM CORE PREPEND ${PW}/src/)
 list(TRANSFORM CORE APPEND .c)
 
@@ -25,10 +33,11 @@ set(SR ${PW}/lib/sr25519-donna/src)
 set(SR_FILES ${SR}/sr25519.c ${SR}/ristretto255.c ${SR}/merlin.c ${SR}/vrf.c ${SR}/sha2.c)
 
 idf_component_register(
-  SRCS main.c hal_esp.c storage_esp.c ble.c ota.c ${CORE} ${TC_FILES} ${SR_FILES}
-  INCLUDE_DIRS . ${PW}/src ${TC}
+  SRCS main.c hal_esp.c storage_esp.c ble.c ota.c ${DISPLAY_SRC} ${CORE} ${TC_FILES} ${SR_FILES}
+  INCLUDE_DIRS . ${PW}/src ${TC} ${PW}/lib/qrcodegen
   REQUIRES bt nvs_flash esp_driver_i2c esp_driver_gpio esp_driver_usb_serial_jtag
            bootloader_support esp_timer esp_hw_support app_update esp_adc esp_pm esp_partition
+           esp_lcd esp_driver_spi esp_driver_ledc
            wamr)
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE

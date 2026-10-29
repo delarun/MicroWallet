@@ -1,5 +1,6 @@
 // hal_sim.c — «плата» для симулятора на ПК: файлы вместо флеша, без экрана.
 // Каталог хранилища — $MW_SIM_DIR (по умолчанию текущий).
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -29,6 +30,11 @@ void hal_random(uint8_t *buf, size_t len) {
 void hal_entropy(uint8_t out[32]) { hal_random(out, 32); }
 void hal_btn_init(void) {}
 bool hal_btn_raw(void) { return false; }
+bool hal_touch(int *x, int *y) {
+  (void)x;
+  (void)y;
+  return false;
+}
 void hal_i2c_init(void) {}
 bool hal_i2c_write(const uint8_t *buf, size_t len) { (void)buf; (void)len; return true; }
 void hal_reboot_bootloader(void) {}
@@ -84,6 +90,7 @@ bool storage_load(uint8_t entropy[32], size_t *len) {
 }
 
 bool storage_save(const uint8_t *entropy, size_t len) {
+  storage_balance_clear();
   uint8_t b[33] = {(uint8_t)len};
   memcpy(b + 1, entropy, len);
   return write_file("seed.bin", b, sizeof b);
@@ -92,6 +99,45 @@ bool storage_save(const uint8_t *entropy, size_t len) {
 void storage_wipe(void) {
   remove(path("seed.bin"));
   remove(path("pin.bin"));
+  storage_balance_clear();
+}
+
+// ---------- балансы: файлы bal_<id>.bin (4 байта времени + текст) ----------
+
+static char *bal_name(const char *id) {
+  static char n[32];
+  snprintf(n, sizeof n, "bal_%s.bin", id);
+  return n;
+}
+
+bool storage_balance_load(const char *id, uint32_t *when, char *text, size_t len) {
+  uint8_t b[4 + BAL_TEXT_MAX];
+  FILE *f = fopen(path(bal_name(id)), "rb");
+  if (!f) return false;
+  size_t n = fread(b, 1, sizeof b, f);
+  fclose(f);
+  if (n < 4 || n - 4 >= len) return false;
+  memcpy(when, b, 4);
+  memcpy(text, b + 4, n - 4);
+  text[n - 4] = 0;
+  return true;
+}
+
+bool storage_balance_save(const char *id, uint32_t when, const char *text) {
+  uint8_t b[4 + BAL_TEXT_MAX];
+  size_t n = strlen(text);
+  if (n > BAL_TEXT_MAX) return false;
+  memcpy(b, &when, 4);
+  memcpy(b + 4, text, n);
+  return write_file(bal_name(id), b, 4 + n);
+}
+
+void storage_balance_clear(void) {
+  DIR *d = opendir(getenv("MW_SIM_DIR") ? getenv("MW_SIM_DIR") : ".");
+  struct dirent *e;
+  while (d && (e = readdir(d)))
+    if (!strncmp(e->d_name, "bal_", 4)) remove(path(e->d_name));
+  if (d) closedir(d);
 }
 
 bool storage_pin_load(pin_rec_t *r) { return read_file("pin.bin", r, sizeof *r) && r->ver == 1; }

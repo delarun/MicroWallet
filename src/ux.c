@@ -47,16 +47,22 @@ bool ux_review(const ux_step_t *steps, int n) {
 #endif
   int total = 0, cur = 0;
   for (int i = 0; i < n; i++) total += step_pages(&steps[i]);
+  ui_anim(UI_ANIM_FADE);
   for (;;) {
     draw(steps, n, cur, total);
     oled_show();
     btn_t b = btn_wait();
-    if (b == BTN_TAP) {
-      cur = (cur + 1) % total;
-    } else if (b == BTN_HOLD) {
-      ux_kind_t k = kind_at(steps, n, cur);
+    ux_kind_t k = kind_at(steps, n, cur);
+    ui_anim_btn(b);
+    if (b == BTN_HOLD) {
       if (k == UX_ACCEPT) return true;
       if (k == UX_REJECT) return false;
+    } else if (b == BTN_SELECT && k == UX_REJECT) {
+      return false;  // отказаться можно и касанием; согласиться — только удержанием
+    } else if (b == BTN_PREV) {
+      cur = (cur + total - 1) % total;
+    } else if (b == BTN_TAP || (b == BTN_SELECT && k != UX_ACCEPT)) {
+      cur = (cur + 1) % total;
     }
   }
 }

@@ -8,7 +8,8 @@
 экраны и связь; каждая монета — приложение WebAssembly в песочнице, ставится и обновляется
 отдельно (как у Ledger).
 
-- ESP32-S3 SuperMini, экран SSD1306 128×64, одна кнопка, аккумулятор с зарядкой на плате;
+- две платы: ESP32-S3 SuperMini (экран SSD1306 128×64, одна кнопка) и Waveshare
+  ESP32-S3-Touch-LCD-1.47 (цветной сенсорный экран 320×172); аккумулятор с зарядкой на плате;
 - связь по USB и Bluetooth LE (свой шифрованный канал), приложения для Android, ПК и консоли;
 - seed из аппаратного ГСЧ; обновление прошивки и приложений — только с подтверждением кнопкой;
 - PIN из 4 цифр одной кнопкой: цифра — длительность нажатия;
@@ -26,10 +27,12 @@
 | `microwallet-esp32s3-{testnet,mainnet}-full.bin` | первый раз: `esptool.py --chip esp32s3 write_flash 0x0 …-full.bin` |
 | `…-{testnet,mainnet}-app.bin` | обновление: с телефона или `python host/wallet.py update …-app.bin` |
 | `…-{testnet,mainnet}-secure-app.bin` | обновление платы с Secure Boot (подписано релизным ключом) |
+| `microwallet-esp32s3-ws147-…` | то же для Waveshare 1.47 (`hw=esp32s3-ws147`) |
 | `microwallet-app-*.wasm`, `…-apps.bin` | приложения: по одному с телефона / `wallet.py app-install`, все разом — `write_flash 0x280000` |
 | `microwallet-android.apk` | приложение для Android (дальше обновляется само) |
 
-Seed и настройки при обновлении сохраняются. Разметка 4 МБ: nvs 0x9000, два слота прошивки
+Телефон и ПК сами берут образ своей платы и не дадут поставить чужой: в образе есть метка
+платы (`mw-board:…`). Seed и настройки при обновлении сохраняются. Разметка 4 МБ: nvs 0x9000, два слота прошивки
 по 1.19 МБ (0x20000, 0x150000), приложения 1.5 МБ с 0x280000. Новая прошивка считается годной
 после 30 с работы — упадёт раньше, загрузчик вернёт прежнюю.
 
@@ -40,6 +43,19 @@ Seed и настройки при обновлении сохраняются. �
 | Экран SDA / SCL | GPIO8 / GPIO9 (I2C 100 кГц, адрес 0x3C) |
 | Кнопка → GND | GPIO1 (будит из выключения); BOOT (GPIO0) тоже работает |
 | Аккумулятор | BAT+/BAT− снизу; напряжение — делитель VBUS/2 на плате (GPIO3) |
+
+| Waveshare ESP32-S3-Touch-LCD-1.47 | |
+|---|---|
+| Экран JD9853 172×320 (SPI 80 МГц) | MOSI 39, SCLK 38, CS 21, DC 45, RST 40, подсветка 46 |
+| Сенсор AXS5106L (I2C 0x63) | SDA 42, SCL 41, RST 47, INT 48 |
+| Кнопка | BOOT (GPIO0): клики, удержание, PIN, будит из выключения |
+| Аккумулятор | разъём BAT, напряжение — делитель BAT/3 на GPIO12 |
+
+Сборка Waveshare: `idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ws147" build`
+(+ `;sdkconfig.mainnet`, `;sdkconfig.secure` — перед ws147). Зарядка ETA6098 на этой плате
+заряжает током **2 А** (R18 = 82 кОм): аккумулятор меньше 2000 мА·ч без замены R18 не подключай
+(330–390 кОм — около 0.5 А, для 1000–2000 мА·ч; меньше ~500 мА·ч ETA6098 не подходит: предзаряд
+200 мА и окончание заряда при 130 мА у неё зашиты).
 
 Пины меняются в `idf.py menuconfig` → MicroWallet. Перемычку BOOST (ток заряда 300 мА) для
 аккумуляторов меньше 500 мА·ч не трогай; светодиоды питания лучше выпаять.
@@ -59,9 +75,19 @@ Seed и настройки при обновлении сохраняются. �
 Кнопка: **нажатие** — следующий экран, **удержание 0.75 с** — выбрать. Главный экран — строка
 иконок приложений (как у Ledger Nano X), сверху сеть, Bluetooth, USB и заряд.
 
+**Waveshare 1.47 — цветной интерфейс** (`src/ui_lcd.c`, те же экраны в 320×172, шрифты Noto):
+главный экран — бесконечная карусель монет в их цветах, лента идёт за пальцем и докатывается
+по инерции; свайп или касание у края — листать, касание посередине — выбрать, палец на месте
+0.75 с — как удержание кнопки (подпись и установка — только удержанием); Receive — QR-код и
+адрес. Переходы анимированы. Экран и сенсор работают на втором ядре, Bluetooth и команды — на
+первом. PIN — по-прежнему кнопкой BOOT.
+
+**Balance** — первый пункт в меню монеты: суммы монеты и токенов, которые телефон или ПК
+присылают после каждого обновления (команда `bal`, кэш в NVS, стирается вместе с seed).
+
 ```
 Bitcoin ─ Pearl ─ Litecoin ─ Solana ─ TRON ─ BNB Chain ─ Ethereum ─ TON ─ Settings
-   └─ Receive ─ About ─ Remove ─ Back
+   └─ Balance ─ Receive ─ About ─ Remove ─ Back
 Settings: Brightness ─ Sleep ─ Power off ─ Addresses ─ PIN ─ Remove PIN ─ Turn off ─ Battery ─
           Bluetooth ─ Forget PCs ─ MicroWallet ─ Wipe ─ Back
 ```
@@ -94,7 +120,9 @@ PIN спрашивается при включении (до него ключи
 memo для TRON, комментарий для TON), устройство (прошивка с GitHub/ПК/файла с выбором версии, приложения и их порядок
 на экране, PSBT, проверка Pearl Wallet). Токены на главной убираются удержанием и включаются в
 «Устройство → Токены на главной»: скрытые не запрашиваются (меньше запросов к сетям); новые
-токены (DAI, USDe, PYUSD, SHIB, PEPE) сначала выключены. Само обновляется из релизов (сверка SHA-256). Есть демо.
+токены (DAI, USDe, PYUSD, SHIB, PEPE) сначала выключены; TRC10 (обычно спам-«аирдропы» без названия,
+«#1005193») — там же, переключатель у TRON, по умолчанию скрыты. Балансы уходят и на устройство
+(пункт Balance). Само обновляется из релизов (сверка SHA-256). Есть демо.
 
 **ПК** — `python host/app.py` (`--ble auto`, `--demo`), то же самое; зависимости —
 `pip install -r host/requirements.txt`.
@@ -169,7 +197,7 @@ P2WPKH-входы и SIGHASH_ALL; мультиподписи и подписи �
 ## Сборка и тесты
 
 ```sh
-./get_deps.sh                                    # lib/: trezor-crypto, WAMR, sr25519-donna
+./get_deps.sh                                    # lib/: trezor-crypto, WAMR, sr25519-donna, qrcodegen
 . ~/esp/esp-idf/export.sh                        # ESP-IDF 5.4
 cd esp32 && idf.py build flash                   # testnet; mainnet: -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.mainnet"
 sh apps/build.sh                                 # приложения (clang с wasm32)
@@ -179,8 +207,9 @@ tools/release.sh [v0.7.3]                        # всё для релиза в
 Симулятор — то же ядро на ПК (`tools/sim/build.sh mwsim`), на нём тесты:
 `test_apps` (песочница, EVM), `test_golden` (адреса и подписи против эталонов), `test_utxo`,
 `test_psbt` (против embit), `test_tron`, `test_ton` (против @ton/ton), `test_sol` (против @solana/web3.js),
-`test_ltc`, `test_pin`, `test_btcd`, `test_curves`, `test_store`
-(`python3 tools/sim/<тест>.py mwsim`). Android: `MW_SIM=… ./gradlew testDebugUnitTest` —
+`test_ltc`, `test_pin`, `test_btcd`, `test_curves`, `test_store`, `test_bal`
+(`python3 tools/sim/<тест>.py mwsim`). Экраны без платы: `tools/oled_preview.c` (OLED или
+`-DUI_LCD` — цветной), шрифты цветного интерфейса — `tools/mkfont.py`. Android: `MW_SIM=… ./gradlew testDebugUnitTest` —
 Kotlin-кошелёк собирает те же транзакции байт в байт, что `host/wallet.py`.
 
 Приложение — папка `apps/<id>/` с `<id>.c` (`mw_main`) и `manifest` (`id`, `name`, `version`,
@@ -235,5 +264,6 @@ Kotlin-кошелёк собирает те же транзакции байт �
 ## Лицензия
 
 [Apache License 2.0](LICENSE). Сторонние библиотеки (`lib/`, через `get_deps.sh`): trezor-crypto —
-MIT, WAMR — Apache-2.0 WITH LLVM-exception, sr25519-donna — Apache-2.0. Шрифт X11 6×10 —
-общественное достояние.
+MIT, WAMR — Apache-2.0 WITH LLVM-exception, sr25519-donna — Apache-2.0, qrcodegen — MIT. Шрифт
+X11 6×10 — общественное достояние; Noto Sans и Noto Sans Mono (цветной интерфейс) — SIL OFL 1.1
+([tools/fonts/OFL.txt](tools/fonts/OFL.txt)).

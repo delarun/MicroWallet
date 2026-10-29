@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Собирает кадры из oled_preview.c в одну картинку «как на OLED»."""
+"""Собирает кадры из oled_preview.c в одну картинку «как на экране» (OLED или цветной LCD)."""
 import sys
 from pathlib import Path
 
@@ -23,7 +23,30 @@ def frame(data, H):
     return img
 
 
+def lcd_sheet(files, dst, scale=2):
+    """Цветные кадры 320x172 (ui_lcd.c): как есть, увеличенные scale раз."""
+    first = Image.open(files[0])
+    w, h = first.width * scale, first.height * scale
+    rows = (len(files) + COLS - 1) // COLS
+    cw, ch = w + 2 * PAD, h + 2 * PAD + LABEL
+    sheet = Image.new("RGB", (cw * COLS, ch * rows), BG)
+    draw = ImageDraw.Draw(sheet)
+    try:
+        font = ImageFont.truetype("DejaVuSans.ttf", 18)
+    except OSError:
+        font = ImageFont.load_default()
+    for i, f in enumerate(files):
+        x, y = (i % COLS) * cw, (i // COLS) * ch
+        draw.rectangle([x + PAD - 6, y + PAD - 6, x + PAD + w + 5, y + PAD + h + 5], fill=BEZEL)
+        sheet.paste(Image.open(f).resize((w, h), Image.NEAREST), (x + PAD, y + PAD))
+        draw.text((x + PAD, y + PAD + h + 8), f.with_suffix(".txt").read_text(), fill=(170, 175, 185), font=font)
+    sheet.save(dst)
+    print(f"{len(files)} экранов -> {dst}")
+
+
 def main(src, dst):
+    if sorted(Path(src).glob("*.ppm")):
+        return lcd_sheet(sorted(Path(src).glob("*.ppm")), dst)
     files = sorted(Path(src).glob("*.bin"))
     H = files[0].read_bytes()[0]
     rows = (len(files) + COLS - 1) // COLS

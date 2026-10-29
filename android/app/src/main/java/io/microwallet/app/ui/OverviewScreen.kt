@@ -169,8 +169,9 @@ private fun ChainCard(vm: AppViewModel, coin: String, net: String) {
 private fun Assets(vm: AppViewModel, coin: String, b: Balance) {
     val catalog = coinInfo(coin).tokensFor(vm.wallet?.net ?: "testnet")
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // токен из каталога убран, пока баланс грузился — не показываем
-        for (a in b.assets.filter { it.id !in catalog || vm.tokenShown(coin, it.id) }) Row(
+        // токен из каталога убран, пока баланс грузился — не показываем; TRC10 (часто спам-«аирдропы»
+        // без названия, #1005193) — по настройке TRON, отправить их можно и скрытыми
+        for (a in vm.visible(coin, b).assets.filter { it.id !in catalog || vm.tokenShown(coin, it.id) }) Row(
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(14.dp))

@@ -49,12 +49,53 @@ bool storage_load(uint8_t entropy[32], size_t *len) {
 
 bool storage_save(const uint8_t *entropy, size_t len) {
   if (len != 16 && len != 24 && len != 32) return false;
+  storage_balance_clear();  // новый seed — старые балансы не его
   return set_blob("seed", entropy, len);
 }
 
 void storage_wipe(void) {
   erase("seed");
   erase("pin");
+  storage_balance_clear();
+}
+
+// ---------- балансы: своё пространство "bal", ключ — id приложения (до 8 символов) ----------
+
+#define NS_BAL "bal"
+
+bool storage_balance_load(const char *id, uint32_t *when, char *text, size_t len) {
+  uint8_t b[4 + BAL_TEXT_MAX];
+  size_t n = sizeof b;
+  nvs_handle_t h;
+  if (nvs_open(NS_BAL, NVS_READONLY, &h) != ESP_OK) return false;
+  bool ok = nvs_get_blob(h, id, b, &n) == ESP_OK && n >= 4 && n - 4 < len;
+  nvs_close(h);
+  if (!ok) return false;
+  memcpy(when, b, 4);
+  memcpy(text, b + 4, n - 4);
+  text[n - 4] = 0;
+  return true;
+}
+
+bool storage_balance_save(const char *id, uint32_t when, const char *text) {
+  uint8_t b[4 + BAL_TEXT_MAX];
+  size_t n = strlen(text);
+  if (n > BAL_TEXT_MAX) return false;
+  memcpy(b, &when, 4);
+  memcpy(b + 4, text, n);
+  nvs_handle_t h;
+  if (nvs_open(NS_BAL, NVS_READWRITE, &h) != ESP_OK) return false;
+  bool ok = nvs_set_blob(h, id, b, 4 + n) == ESP_OK && nvs_commit(h) == ESP_OK;
+  nvs_close(h);
+  return ok;
+}
+
+void storage_balance_clear(void) {
+  nvs_handle_t h;
+  if (nvs_open(NS_BAL, NVS_READWRITE, &h) != ESP_OK) return;
+  nvs_erase_all(h);
+  nvs_commit(h);
+  nvs_close(h);
 }
 
 bool storage_pin_load(pin_rec_t *r) {

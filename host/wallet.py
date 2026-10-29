@@ -57,6 +57,7 @@ import urllib.parse
 import urllib.request
 import zlib
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from decimal import Decimal, InvalidOperation
 from typing import Callable
@@ -341,6 +342,38 @@ def to_units(s, decimals):
 def fmt_units(v, decimals):
     s = f"{Decimal(v).scaleb(-decimals):f}"
     return s.rstrip("0").rstrip(".") if "." in s else s
+
+
+def image_board(image):
+    """Для какой платы образ прошивки: метка «mw-board:<hw>;» (с v0.9), без неё — по чипу в
+    заголовке (ESP-IDF: esp_chip_id_t): старые образы — только для SuperMini, hw=esp32s3."""
+    chip = {0x0005: "esp32c3", 0x0009: "esp32s3"}.get(int.from_bytes(image[12:14], "little"), "?")
+    i = image.find(b"mw-board:")
+    if i < 0:
+        return chip
+    j = image.find(b";", i, i + 48)
+    return image[i + 9:j].decode("ascii", "replace") if j > 0 else chip
+
+
+NATIVE = {"tron": "trx", "bsc": "bnb", "ton": "gram"}  # монета самой сети; у остальных — id монеты
+
+
+def balance_text(coin, b):
+    """Суммы для экрана устройства (команда bal): сама монета, потом ненулевые токены, через ';',
+    до 120 символов печатного ASCII."""
+    assets = b["assets"]
+    native = [a for a in assets if a["id"] == NATIVE.get(coin, coin)] or assets[:1]
+    parts = [f"{fmt_units(a['amount'], a['decimals'])} {a['symbol']}"
+             for a in native + [a for a in assets if a not in native and a["amount"]]]
+    text = ""
+    for p in parts:
+        if not p.isascii() or not p.isprintable() or ";" in p:
+            continue
+        t = f"{text};{p}" if text else p
+        if len(t) > 120:
+            break
+        text = t
+    return text or None
 
 
 # ---------------- http ----------------
@@ -805,10 +838,9 @@ class Wallet:
             raise WalletError(f"Обновление прошивки не поддерживается для {hw}")
         if len(image) < 24 or image[:1] != b"\xe9":
             raise WalletError("Это не образ приложения ESP32 (ожидается build/microwallet.bin)")
-        # В заголовке образа — для какого чипа он собран (ESP-IDF: esp_chip_id_t)
-        chip = {0x0005: "esp32c3", 0x0009: "esp32s3"}.get(int.from_bytes(image[12:14], "little"), "?")
-        if chip != hw:
-            raise WalletError(f"Образ собран для {chip}, а устройство — {hw}")
+        board = image_board(image)
+        if board != hw:
+            raise WalletError(f"Образ собран для {board}, а устройство — {hw}")
         digest = hashlib.sha256(image).hexdigest()
         # Сжатый поток (прошивки с v0.7): на ~40% меньше данных; старые ответят «unknown»
         # ещё до экрана подтверждения — тогда как раньше
@@ -892,6 +924,24 @@ class Wallet:
         return self.ready
 
     # ---- баланс ----
+
+    def cache_balance(self, coin, b):
+        """Запомнить баланс на устройстве (bal): он виден в меню монеты на самом устройстве.
+        Тот же текст недавно — не отправляется (не писать флеш устройства без нужды)."""
+        text = balance_text(coin, b)
+        if self.locked or not self.ready or self.legacy or coin not in self.coins or not text:
+            return
+        now = time.time()
+        sent = getattr(self, "_sent_bal", {})
+        self._sent_bal = sent
+        if sent.get(coin, ("", 0))[0] == text and now - sent[coin][1] < 600:
+            return
+        local = int(now + datetime.now().astimezone().utcoffset().total_seconds())  # устройство показывает как есть
+        try:
+            self.dev.call(f"bal {coin} {local} {text}")
+            sent[coin] = (text, now)
+        except DeviceError:
+            pass  # прошивка без команды bal
 
     def balance(self, coin, index=0):
         """{"address", "assets": [{"id","symbol","amount","decimals"}], "pending", "utxos", "notes"}"""
