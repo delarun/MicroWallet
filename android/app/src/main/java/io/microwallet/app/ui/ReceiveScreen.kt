@@ -58,7 +58,7 @@ fun ReceiveScreen(vm: AppViewModel) {
         return
     }
     var coin by rememberSaveable { mutableStateOf(vm.coinRequest ?: coins.first()) }
-    var index by rememberSaveable { mutableStateOf(0) }
+    var index by rememberSaveable { mutableStateOf(vm.account(coin)) }
     var addr by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf("info" to "") }
     var verifying by remember { mutableStateOf(false) }
@@ -66,7 +66,7 @@ fun ReceiveScreen(vm: AppViewModel) {
     val count = vm.info["addrs"]?.toIntOrNull()?.coerceIn(1, 20) ?: ADDRS_DEFAULT
     LaunchedEffect(count) { if (index > count - 1) index = count - 1 }
     LaunchedEffect(vm.coinRequest) {
-        vm.coinRequest?.let { coin = it }
+        vm.coinRequest?.let { coin = it; index = vm.account(it) }
         vm.coinRequest = null
     }
     LaunchedEffect(coin, index, w) {
@@ -95,7 +95,7 @@ fun ReceiveScreen(vm: AppViewModel) {
         ScreenTitle("Получить", "Адрес для приёма — сверь его с экраном устройства")
         CoinPills(coins, coin) {
             coin = it
-            index = 0
+            index = vm.account(it)  // адрес, выбранный на «Обзоре»
         }
         Card {
             Row(verticalAlignment = Alignment.CenterVertically) {

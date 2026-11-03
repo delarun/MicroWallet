@@ -46,7 +46,7 @@ class DemoWallet(empty: Boolean = false, private val wordlist: List<String> = em
         return true
     }
 
-    override fun balance(coin: String, skip: Set<String>): Balance {
+    override fun balance(coin: String, skip: Set<String>, index: Int): Balance {
         Thread.sleep(Random.nextLong(400, 1200))
         val e18 = BigInteger.TEN.pow(18)
         val assets = when (coin) {
@@ -69,6 +69,8 @@ class DemoWallet(empty: Boolean = false, private val wordlist: List<String> = em
             )
         }
         val pending = if (coin == "prl") BigInteger.valueOf(225_390_153_581) else BigInteger.ZERO
+        if (index > 0 && coin !in UTXO)  // другой адрес-счёт: пустой
+            return Balance(address(coin, index), assets.filter { it.id !in skip }.map { it.copy(amount = BigInteger.ZERO) })
         return Balance(addrs.getValue(coin), assets.filter { it.id !in skip }, pending)
     }
 

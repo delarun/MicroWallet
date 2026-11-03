@@ -22,7 +22,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.CallMade
 import androidx.compose.material.icons.automirrored.rounded.CallReceived
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -42,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import io.microwallet.app.core.Balance
 import io.microwallet.app.core.COINS
 import io.microwallet.app.core.PRL_COINBASE_MATURITY
+import io.microwallet.app.core.UTXO
 import io.microwallet.app.core.assetsFor
 import io.microwallet.app.core.coinInfo
 import io.microwallet.app.core.fmtUnits
@@ -143,6 +146,19 @@ private fun ChainCard(vm: AppViewModel, coin: String, net: String) {
                 Spacer(Modifier.width(6.dp))
                 Icon(Icons.Rounded.ContentCopy, "Скопировать", tint = C.accent2, modifier = Modifier.size(15.dp))
             }
+        }
+        val idx = vm.account(coin)
+        if (coin !in UTXO && (vm.addrCount > 1 || idx > 0)) Row(
+            Modifier.fillMaxWidth().padding(top = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Адрес #$idx" + if (idx > 0) "" else " · основной",
+                color = C.muted, fontSize = 13.sp, modifier = Modifier.weight(1f),
+            )
+            SmallIconButton(Icons.Rounded.Remove, "Предыдущий адрес", { vm.setAccount(coin, idx - 1) }, enabled = idx > 0)
+            SmallIconButton(Icons.Rounded.Add, "Следующий адрес", { vm.setAccount(coin, idx + 1) },
+                enabled = idx < vm.addrCount - 1)
         }
         Spacer(Modifier.height(14.dp))
         when (state) {

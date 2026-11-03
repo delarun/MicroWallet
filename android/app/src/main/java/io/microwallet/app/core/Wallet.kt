@@ -98,8 +98,9 @@ interface WalletApi {
     fun symbol(asset: String): String = cfg.symbol(asset)
     fun address(coin: String, index: Int = 0, chain: Int = 0): String
     fun showAddress(coin: String, index: Int = 0): String
-    /** skip — токены, баланс которых не запрашивать (убраны с главной). */
-    fun balance(coin: String, skip: Set<String> = emptySet()): Balance
+    /** skip — токены, баланс которых не запрашивать (убраны с главной); index — номер адреса
+     *  у монет с одним адресом-счётом (TRON, BSC, ETH, TON, SOL); у BTC/PRL/LTC — все адреса сразу. */
+    fun balance(coin: String, skip: Set<String> = emptySet(), index: Int = 0): Balance
     /** Запомнить баланс на устройстве (команда bal): его видно в меню монеты на самом устройстве. */
     fun cacheBalance(coin: String, b: Balance) {}
     fun feeLevels(coin: String): Map<String, BigDecimal>
@@ -516,7 +517,7 @@ class Wallet(
 
     // ---- баланс ----
 
-    override fun balance(coin: String, skip: Set<String>): Balance {
+    override fun balance(coin: String, skip: Set<String>, index: Int): Balance {
         need(coin)
         if (coin in UTXO) {
             val s = scan(coin)
@@ -527,7 +528,7 @@ class Wallet(
                 utxos = s.utxos, immature = s.immature,
             )
         }
-        val addr = address(coin, 0)
+        val addr = address(coin, index)
         if (coin == "ton") return tonBalance(addr, skip)
         if (coin == "sol") {
             val tokens = cfg.solMints.filterKeys { it !in skip }.map { (id, m) ->

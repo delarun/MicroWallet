@@ -215,6 +215,11 @@ private fun SendForm(vm: AppViewModel) {
     }
     CoinPills(vm.coins, s.coin) { s.selectCoin(it) }
     Card {
+        val from = vm.account(s.coin)
+        if (from > 0) {
+            Text("С адреса #$from — сменить можно на «Обзоре», в карточке монеты", color = C.muted, fontSize = 13.sp)
+            Spacer(Modifier.height(10.dp))
+        }
         // TRC10 — те, что есть на балансе (их ID знает только нода)
         val trc10 = if (s.coin != "tron") emptyList() else (vm.balances["tron"] as? Load.Ok)?.v?.assets
             ?.map { it.id }?.filter { it.startsWith("trc10:") }.orEmpty().take(2)
@@ -346,7 +351,7 @@ private fun SendForm(vm: AppViewModel) {
                 s.formErr = ""
                 s.preparing = true
                 val req = SendRequest(
-                    coin = s.coin, dest = s.dest, amount = s.amount, asset = s.asset,
+                    coin = s.coin, dest = s.dest, amount = s.amount, asset = s.asset, index = vm.account(s.coin),
                     feerate = if (utxo) s.levels?.get(s.feeLevel) else null,
                     feeLimit = if (s.coin == "tron" && s.asset == "usdt") s.feeLimit.ifBlank { null } else null,
                     memo = if (s.coin == "tron" || s.coin == "ton") s.memo.ifEmpty { null } else null,

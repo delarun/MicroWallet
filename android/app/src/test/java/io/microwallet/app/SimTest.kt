@@ -197,6 +197,22 @@ class SimTest {
         dev.close()
     }
 
+    /** Баланс выбранного адреса (#1), а не всегда #0: у TRON/EVM адрес — это счёт. */
+    @Test
+    fun balanceOfIndex() {
+        val dev = LineDevice(Sim.start("lines", Sim.newDir()))
+        dev.call("restore " + "00".repeat(16))
+        Wallet(dev, FakeHttp(JSONObject()), Sim.words).let { s -> for (f in Sim.apps) s.installApp(inspectApp(f.readBytes())) { _, _ -> } }
+        val http = FakeHttp(JSONObject().put("POST https://nile.trongrid.io/wallet/getaccount", JSONObject().put("balance", 5_000_000)))
+        val w = Wallet(dev, http, Sim.words)
+        val b0 = w.balance("tron", setOf("usdt"))
+        val b1 = w.balance("tron", setOf("usdt"), 1)
+        assertEquals(w.address("tron", 0), b0.address)
+        assertEquals(w.address("tron", 1), b1.address)
+        assertTrue(b0.address != b1.address)
+        dev.close()
+    }
+
     /** Баланс после обновления уходит на устройство (bal): монета первой, ненулевые токены, без
      *  повтора того же текста; на устройстве он виден в меню монеты. */
     @Test

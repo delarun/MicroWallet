@@ -14,7 +14,9 @@ import io.microwallet.app.ble.BleScanner
 import io.microwallet.app.ble.Found
 import io.microwallet.app.ble.GattTransport
 import io.microwallet.app.ble.KeystoreBondStore
+import io.microwallet.app.core.ADDRS_DEFAULT
 import io.microwallet.app.core.Balance
+import io.microwallet.app.core.UTXO
 import io.microwallet.app.core.COINS
 import io.microwallet.app.core.DEFAULT_REPO
 import io.microwallet.app.core.DemoWallet
@@ -503,8 +505,29 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val w = wallet ?: return
         val skip = hiddenTokens(c)
         balances[c] = Load.Loading
-        run({ w.balance(c, skip).also { b -> runCatching { w.cacheBalance(c, visible(c, b)) } } },  // и на устройство: видно в меню монеты
-            { if (wallet === w) balances[c] = Load.Ok(it) }, { if (wallet === w) balances[c] = Load.Err(it) })
+        val i = account(c)
+        run({ w.balance(c, skip, i).also { b -> runCatching { w.cacheBalance(c, visible(c, b)) } } },  // и на устройство: видно в меню монеты
+            { if (wallet === w && account(c) == i) balances[c] = Load.Ok(it) },
+            { if (wallet === w && account(c) == i) balances[c] = Load.Err(it) })
+    }
+
+    // ---------------- адрес монеты ----------------
+
+    private val accounts = mutableStateMapOf<String, Int>()
+
+    /** С какого адреса (#0, #1, …) считать баланс и отправлять — у монет с одним адресом-счётом
+     *  (TRON, BSC, ETH, TON, SOL). BTC/PRL/LTC собирают монеты со всех адресов сразу: всегда 0. */
+    fun account(coin: String): Int =
+        if (coin in UTXO) 0 else accounts.getOrPut(coin) { prefs.getInt("account_$coin", 0) }
+
+    /** Сколько адресов можно выбрать: настройка устройства «Addresses» (его экран Receive их покажет). */
+    val addrCount: Int get() = info["addrs"]?.toIntOrNull()?.coerceIn(1, 20) ?: ADDRS_DEFAULT
+
+    fun setAccount(coin: String, index: Int) {
+        if (coin in UTXO || index < 0 || index == account(coin)) return
+        accounts[coin] = index
+        prefs.edit().putInt("account_$coin", index).apply()
+        if (wallet?.ready == true && coin in coins) loadBalance(coin)
     }
 
     // ---------------- токены на главной ----------------
