@@ -15,6 +15,9 @@ import io.microwallet.app.ble.Found
 import io.microwallet.app.ble.GattTransport
 import io.microwallet.app.ble.KeystoreBondStore
 import io.microwallet.app.core.ADDRS_DEFAULT
+import io.microwallet.app.core.Aml
+import io.microwallet.app.core.AmlKeys
+import io.microwallet.app.core.AmlReport
 import io.microwallet.app.core.Balance
 import io.microwallet.app.core.UTXO
 import io.microwallet.app.core.COINS
@@ -509,6 +512,49 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         run({ w.balance(c, skip, i).also { b -> runCatching { w.cacheBalance(c, visible(c, b)) } } },  // и на устройство: видно в меню монеты
             { if (wallet === w && account(c) == i) balances[c] = Load.Ok(it) },
             { if (wallet === w && account(c) == i) balances[c] = Load.Err(it) })
+    }
+
+    // ---------------- AML-проверка (BSC, USDT) ----------------
+
+    var amlKeys by mutableStateOf(
+        AmlKeys(prefs.getString("aml_nodereal", "").orEmpty(), prefs.getString("aml_chainalysis", "").orEmpty())
+    )
+        private set
+    var amlDays by mutableStateOf(prefs.getInt("aml_days", 30))
+        private set
+    /** Открыт экран AML-проверки этого адреса (свой адрес BSC). */
+    var amlTarget by mutableStateOf<String?>(null)
+    /** Отчёты за сессию: "адрес/дни" -> отчёт. */
+    val amlReports = mutableStateMapOf<String, Load<AmlReport>>()
+    /** Ход проверки: "адрес/дни" -> (сделано, всего запросов истории). */
+    val amlProgress = mutableStateMapOf<String, Pair<Int, Int>>()
+    private val aml by lazy {
+        Aml(UrlHttp(), Aml.parseLabels(ctx.assets.open("aml_labels.json").bufferedReader().use { it.readText() }))
+    }
+
+    fun amlKey(addr: String, days: Int) = "${addr.lowercase()}/$days"
+
+    fun setAmlSettings(nodereal: String, chainalysis: String, days: Int) {
+        amlKeys = AmlKeys(nodereal.trim(), chainalysis.trim())
+        amlDays = days
+        prefs.edit().putString("aml_nodereal", amlKeys.nodereal).putString("aml_chainalysis", amlKeys.chainalysis)
+            .putInt("aml_days", days).apply()
+        amlReports.clear()
+    }
+
+    /** Проверить адрес BSC (повторно — только с force: отчёт за сессию кэшируется). */
+    fun amlCheck(addr: String, days: Int = amlDays, force: Boolean = false) {
+        val w = wallet ?: return
+        val k = amlKey(addr, days)
+        if (!force && (amlReports[k] is Load.Ok || amlReports[k] == Load.Loading)) return
+        amlReports[k] = Load.Loading
+        amlProgress.remove(k)
+        val keys = amlKeys
+        run({
+            aml.check(w.net, w.cfg.bscUsdt, addr, keys, days) { done, total ->
+                viewModelScope.launch { amlProgress[k] = done to total }
+            }
+        }, { amlReports[k] = Load.Ok(it) }, { amlReports[k] = Load.Err(it) })
     }
 
     // ---------------- адрес монеты ----------------

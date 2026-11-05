@@ -91,7 +91,7 @@ fun App(vm: AppViewModel) {
         containerColor = C.bg,
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = { if (w != null) TopBar(vm) },
-        bottomBar = { if (w != null && !vm.showRestore && !vm.showFirmware && !vm.showApps) BottomBar(vm) },
+        bottomBar = { if (w != null && !vm.showRestore && !vm.showFirmware && !vm.showApps && vm.amlTarget == null) BottomBar(vm) },
     ) { pad ->
         Column(Modifier.fillMaxSize().padding(pad)) {
             AppUpdateBanner(vm)
@@ -101,6 +101,7 @@ fun App(vm: AppViewModel) {
                     vm.showRestore -> RestoreScreen(vm)
                     vm.showFirmware -> FirmwareScreen(vm)
                     vm.showApps -> AppsScreen(vm)
+                    vm.amlTarget != null -> AmlScreen(vm)
                     else -> AnimatedContent(vm.tab, label = "tab", transitionSpec = { fadeIn() togetherWith fadeOut() }) { t ->
                         when (t) {
                             Tab.Overview -> OverviewScreen(vm)

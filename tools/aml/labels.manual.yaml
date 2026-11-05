@@ -1,0 +1,17 @@
+# Ваша ручная разметка. update_labels.py склеивает её с автоматическими
+# списками в labels.yaml (ручные записи имеют приоритет).
+#
+# risk: high | medium | low | trusted
+# Сюда — то, чего нет в публичных списках: горячие кошельки Cryptomus/Heleket,
+# Grinex, Rapira, EXMO и т.д., найденные через Arkham/BscScan (по свипам).
+# Указывайте источник и дату, чтобы потом было понятно, откуда метка.
+
+addresses:
+  # - address: "0x..."
+  #   label: "Heleket: горячий кошелёк"
+  #   risk: high
+  #   source: "Arkham, 2026-11-05"
+  #
+  # - address: "0x..."
+  #   label: "Мой основной адрес"
+  #   risk: trusted

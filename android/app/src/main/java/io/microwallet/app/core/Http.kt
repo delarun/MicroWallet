@@ -9,6 +9,8 @@ import java.net.URL
 /** Сеть. JSON-ответы — JSONObject или JSONArray. В тестах подменяется. */
 interface Http {
     fun get(url: String): Any
+    /** GET JSON с заголовками (ключ API: Chainalysis). */
+    fun get(url: String, headers: Map<String, String>): Any = get(url)
     /** GET с текстовым ответом (сырая транзакция в hex у mempool.space). */
     fun getText(url: String): String
     fun post(url: String, body: JSONObject): Any
@@ -28,10 +30,10 @@ class UrlHttp : Http {
 
     /** 429/503 — сервер просит подождать (mempool.space ограничивает частоту): ждём,
      *  сколько он скажет в Retry-After (не больше 30 с), иначе 2, 4, 8 с, и повторяем. */
-    private fun requestRetrying(url: String, body: String?, json: Boolean): Reply {
+    private fun requestRetrying(url: String, body: String?, json: Boolean, headers: Map<String, String> = emptyMap()): Reply {
         var attempt = 0
         while (true) {
-            val r = request(url, body, json)
+            val r = request(url, body, json, headers)
             if (r.code !in setOf(429, 503) || attempt == RETRIES) return r
             val wait = if (r.retryAfter > 0) minOf(r.retryAfter, 30) else 2 shl attempt
             Thread.sleep(wait * 1000L)
@@ -39,13 +41,14 @@ class UrlHttp : Http {
         }
     }
 
-    private fun request(url: String, body: String?, json: Boolean): Reply {
+    private fun request(url: String, body: String?, json: Boolean, headers: Map<String, String>): Reply {
         val c = URL(url).openConnection() as HttpURLConnection
         try {
             c.connectTimeout = 20_000
             c.readTimeout = 20_000
             c.setRequestProperty("User-Agent", "microwallet-android/0.5")
             if (json) c.setRequestProperty("Content-Type", "application/json")
+            for ((k, v) in headers) c.setRequestProperty(k, v)
             if (body != null) {
                 c.requestMethod = "POST"
                 c.doOutput = true
@@ -60,9 +63,9 @@ class UrlHttp : Http {
         }
     }
 
-    private fun json(url: String, body: JSONObject?): Any {
+    private fun json(url: String, body: JSONObject?, headers: Map<String, String> = emptyMap()): Any {
         val r = try {
-            requestRetrying(url, body?.toString(), true)
+            requestRetrying(url, body?.toString(), true, headers)
         } catch (e: IOException) {
             throw WalletError("Нет связи с ${host(url)}: ${e.message}")
         }
@@ -78,6 +81,7 @@ class UrlHttp : Http {
     }
 
     override fun get(url: String) = json(url, null)
+    override fun get(url: String, headers: Map<String, String>) = json(url, null, headers)
 
     override fun getText(url: String): String {
         val r = try {

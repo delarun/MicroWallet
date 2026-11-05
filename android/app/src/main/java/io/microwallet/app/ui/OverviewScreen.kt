@@ -25,6 +25,7 @@ import androidx.compose.material.icons.automirrored.rounded.CallReceived
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Remove
+import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -176,6 +177,12 @@ private fun ChainCard(vm: AppViewModel, coin: String, net: String) {
                 vm.coinRequest = coin
                 vm.tab = Tab.Receive
             }, Modifier.weight(1f), icon = Icons.AutoMirrored.Rounded.CallReceived)
+        }
+        val b = (state as? Load.Ok)?.v
+        if (coin == "bsc" && b != null && !vm.isDemo) {
+            Spacer(Modifier.height(10.dp))
+            SecondaryButton("AML-проверка адреса", { vm.amlTarget = b.address }, Modifier.fillMaxWidth(),
+                icon = Icons.Rounded.Shield)
         }
     }
 }

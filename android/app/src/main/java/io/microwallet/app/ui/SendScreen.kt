@@ -406,6 +406,10 @@ private fun Review(vm: AppViewModel) {
         Divider()
         for (n in d.notes) Text(n, color = C.faint, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
     }
+    if (d.coin == "bsc" && !vm.isDemo) {
+        Spacer(Modifier.height(14.dp))
+        RecipientAml(vm, d.to)
+    }
     Spacer(Modifier.height(16.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         SecondaryButton("Назад", { s.step = Step.Form }, Modifier.weight(1f).height(52.dp))
